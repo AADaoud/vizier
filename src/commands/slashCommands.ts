@@ -1,6 +1,7 @@
 import { App, TFile } from 'obsidian';
-import { callOllamaStructured } from '../utils/ollama';
+import { callOllama, callOllamaStructured } from '../utils/ollama';
 import { mapReduceSummarize } from '../utils/chunking';
+import { Prompts } from '../prompts';
 
 export interface SlashCommand {
 	id: string;
@@ -8,6 +9,22 @@ export interface SlashCommand {
 	description: string;
 	template: string;
 }
+
+export interface CommandConfig {
+	ollamaUrl: string;
+	transcriptServerUrl: string;
+}
+
+export type AddMessage = (role: 'user' | 'assistant', content: string) => void;
+export type ReplaceMessage = (role: 'user' | 'assistant', content: string) => void;
+
+export interface FindCandidate {
+	title: string;
+	relevance: string;
+	terms: string[];
+}
+
+export type AddFindResults = (query: string, candidates: FindCandidate[]) => void;
 
 export const SLASH_COMMANDS: SlashCommand[] = [
 	{
@@ -19,7 +36,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 	{
 		id: 'find',
 		label: '/find',
-		description: 'Find notes in your vault by title or content',
+		description: 'Find notes using natural language',
 		template: '/find ',
 	},
 	{
@@ -28,9 +45,95 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		description: 'Summarize a YouTube video or article from a URL',
 		template: '/summarize ',
 	},
+	{
+		id: 'clip',
+		label: '/clip',
+		description: 'Fetch a URL, summarize it, and save to your Clips folder',
+		template: '/clip ',
+	},
+	{
+		id: 'read',
+		label: '/read',
+		description: 'Summarize or ask a question about the active note',
+		template: '/read ',
+	},
 ];
 
-export type AddMessage = (role: 'user' | 'assistant', content: string) => void;
+// --- helpers ---
+
+function sanitizeFilename(name: string): string {
+	const cleaned = name.replace(/[/\\:*?"<>|]/g, '-').replace(/-{2,}/g, '-').trim();
+	return cleaned || 'untitled';
+}
+
+function sanitizeTag(tag: string): string {
+	const cleaned = tag
+		.toLowerCase()
+		.replace(/\s+/g, '-')
+		.replace(/[^a-z0-9\-_]/g, '')
+		.replace(/-{2,}/g, '-')
+		.replace(/^-+|-+$/g, '');
+	return cleaned || '';
+}
+
+function buildYamlTags(tags: string[]): string {
+	return tags
+		.map(t => sanitizeTag(t))
+		.filter(t => t.length > 0)
+		.filter((t, i, arr) => arr.indexOf(t) === i)
+		.map(t => `  - ${t}`)
+		.join('\n');
+}
+
+function extractText(html: string): string {
+	let text = html.replace(/<(script|style|nav|header|footer|noscript)[^>]*>[\s\S]*?<\/\1>/gi, '');
+	text = text.replace(/<\/(p|h[1-6]|li|tr|div|br)>/gi, '\n');
+	text = text.replace(/<[^>]+>/g, '');
+	text = text
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		.replace(/&nbsp;/g, ' ');
+	return text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
+}
+
+function extractYouTubeId(url: string): string | null {
+	try {
+		const parsed = new URL(url);
+		if (parsed.hostname.includes('youtube.com')) return parsed.searchParams.get('v');
+		if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1) || null;
+	} catch { /* invalid URL */ }
+	return null;
+}
+
+async function fetchAndSummarizeYouTube(url: string, model: string, config: CommandConfig): Promise<string> {
+	const videoId = extractYouTubeId(url);
+	if (!videoId) throw new Error('Could not parse a YouTube video ID from that URL.');
+
+	const response = await fetch(`${config.transcriptServerUrl}/transcript?video_id=${encodeURIComponent(videoId)}`);
+	const data = await response.json() as { transcript?: string; error?: string };
+	if (!response.ok) {
+		throw new Error(data.error ?? `Transcript server returned HTTP ${response.status}.`);
+	}
+	if (!data.transcript || data.transcript.trim().length < 100) {
+		throw new Error('No usable transcript available for this video.');
+	}
+
+	return mapReduceSummarize(data.transcript, model, 'YouTube video', config.ollamaUrl);
+}
+
+async function fetchAndSummarizeArticle(url: string, model: string, ollamaUrl: string): Promise<string> {
+	const response = await fetch(url);
+	if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}.`);
+	const html = await response.text();
+	const text = extractText(html);
+	if (text.length < 100) {
+		throw new Error('Could not extract readable text from that URL. The page may require JavaScript or authentication.');
+	}
+	return mapReduceSummarize(text, model, 'article', ollamaUrl);
+}
 
 // --- /write ---
 
@@ -50,16 +153,12 @@ const NOTE_SCHEMA = {
 	required: ['filename', 'tags', 'body'],
 };
 
-function sanitizeFilename(name: string): string {
-	const cleaned = name.replace(/[/\\:*?"<>|]/g, '-').replace(/-{2,}/g, '-').trim();
-	return cleaned || 'untitled';
-}
-
 export async function executeWrite(
 	args: string,
 	app: App,
 	addMessage: AddMessage,
-	model: string
+	model: string,
+	config: CommandConfig
 ): Promise<void> {
 	const topic = args.trim();
 	if (!topic) {
@@ -70,17 +169,9 @@ export async function executeWrite(
 	let result: NoteStructure;
 	try {
 		result = await callOllamaStructured<NoteStructure>({
+			ollamaUrl: config.ollamaUrl,
 			model,
-			messages: [
-				{
-					role: 'user',
-					content:
-						`Create a well-structured Obsidian markdown note about: ${topic}\n\n` +
-						`Provide a descriptive filename (no extension, no path separators), ` +
-						`relevant tags as an array, and detailed content for the body field. ` +
-						`The body should use markdown headings and be thorough.`,
-				},
-			],
+			messages: [{ role: 'user', content: Prompts.writeNote(topic) }],
 			format: NOTE_SCHEMA,
 		});
 	} catch (err) {
@@ -94,9 +185,7 @@ export async function executeWrite(
 	const prefix = folderPath === '/' ? '' : `${folderPath}/`;
 	const filePath = `${prefix}${sanitized}.md`;
 
-	const yamlTags = result.tags
-		.map(t => `  - ${t.replace(/:/g, '-')}`)
-		.join('\n');
+	const yamlTags = buildYamlTags(result.tags);
 	const fileContent = `---\ntags:\n${yamlTags}\n---\n\n${result.body}`;
 
 	try {
@@ -115,6 +204,18 @@ export async function executeWrite(
 }
 
 // --- /find ---
+
+interface FindTermsResult {
+	terms: string[];
+}
+
+const FIND_TERMS_SCHEMA = {
+	type: 'object',
+	properties: {
+		terms: { type: 'array', items: { type: 'string' } },
+	},
+	required: ['terms'],
+};
 
 interface FindResult {
 	summary: string;
@@ -144,188 +245,97 @@ export async function executeFind(
 	args: string,
 	app: App,
 	addMessage: AddMessage,
-	model: string
+	addFindResults: AddFindResults,
+	model: string,
+	config: CommandConfig
 ): Promise<void> {
 	const query = args.trim();
 	if (!query) {
-		addMessage('assistant', 'Usage: `/find <query>` — searches note titles and content.\n\nExample: `/find project ideas`');
+		addMessage('assistant', 'Usage: `/find <natural language query>`\n\nExample: `/find notes about machine learning and neural networks`');
 		return;
 	}
 
-	const lower = query.toLowerCase();
-	const files = app.vault.getMarkdownFiles();
+	addMessage('assistant', 'Generating search terms…');
 
-	const titleMatches: string[] = [];
-	const contentMatches: string[] = [];
-
-	for (const file of files) {
-		if (file.basename.toLowerCase().includes(lower)) {
-			titleMatches.push(file.basename);
-		}
-	}
-
-	const toSearch = files.filter(f => !titleMatches.includes(f.basename));
-	for (const file of toSearch.slice(0, 300)) {
-		try {
-			const text = await app.vault.cachedRead(file);
-			if (text.toLowerCase().includes(lower)) {
-				contentMatches.push(file.basename);
-			}
-		} catch {
-			// skip unreadable files
-		}
-	}
-
-	if (titleMatches.length === 0 && contentMatches.length === 0) {
-		addMessage('assistant', `No notes found matching **"${query}"**.`);
-		return;
-	}
-
-	// Build plain fallback output (used if Ollama fails)
-	const fallbackLines: string[] = [];
-	if (titleMatches.length > 0) {
-		fallbackLines.push(`**Title matches (${titleMatches.length}):**`);
-		fallbackLines.push(...titleMatches.slice(0, 15).map(t => `- [[${t}]]`));
-	}
-	if (contentMatches.length > 0) {
-		if (fallbackLines.length > 0) fallbackLines.push('');
-		fallbackLines.push(`**Content matches (${contentMatches.length}):**`);
-		fallbackLines.push(...contentMatches.slice(0, 15).map(t => `- [[${t}]]`));
-	}
-
-	// Build context for Ollama
-	const titleSection = titleMatches.length > 0
-		? `Title matches:\n${titleMatches.slice(0, 15).map(t => `- ${t}`).join('\n')}`
-		: '';
-	const contentSection = contentMatches.length > 0
-		? `Content matches:\n${contentMatches.slice(0, 15).map(t => `- ${t}`).join('\n')}`
-		: '';
-	const searchContext = [titleSection, contentSection].filter(Boolean).join('\n\n');
-
+	// Step 1: use AI to generate search terms from natural language
+	let terms: string[] = [];
 	try {
-		const result = await callOllamaStructured<FindResult>({
+		const result = await callOllamaStructured<FindTermsResult>({
+			ollamaUrl: config.ollamaUrl,
 			model,
-			messages: [
-				{
-					role: 'user',
-					content:
-						`The user searched their Obsidian vault for: "${query}"\n\n` +
-						`Here are the matching notes found:\n${searchContext}\n\n` +
-						`Provide a brief summary of what these notes are likely about and a short relevance note for each match.`,
-				},
-			],
+			messages: [{ role: 'user', content: Prompts.findQueryTerms(query) }],
+			format: FIND_TERMS_SCHEMA,
+		});
+		terms = result.terms.filter(t => t.trim().length > 0).slice(0, 6);
+	} catch {
+		// fall back to the raw query as a single term
+		terms = [query];
+	}
+
+	if (terms.length === 0) terms = [query];
+
+	// Step 2: search vault with all terms
+	const files = app.vault.getMarkdownFiles();
+	const matchMap = new Map<string, Set<string>>(); // title → matched terms
+
+	for (const term of terms) {
+		const lower = term.toLowerCase();
+		for (const file of files) {
+			if (file.basename.toLowerCase().includes(lower)) {
+				if (!matchMap.has(file.basename)) matchMap.set(file.basename, new Set());
+				matchMap.get(file.basename)!.add(term);
+			}
+		}
+		const unmatched = files.filter(f => !matchMap.has(f.basename));
+		for (const file of unmatched.slice(0, 300)) {
+			try {
+				const text = await app.vault.cachedRead(file);
+				if (text.toLowerCase().includes(lower)) {
+					if (!matchMap.has(file.basename)) matchMap.set(file.basename, new Set());
+					matchMap.get(file.basename)!.add(term);
+				}
+			} catch { /* skip */ }
+		}
+	}
+
+	if (matchMap.size === 0) {
+		addMessage('assistant', `No notes found for **"${query}"**.\n\nSearch terms tried: ${terms.map(t => `\`${t}\``).join(', ')}`);
+		return;
+	}
+
+	// Step 3: get relevance blurbs from AI
+	const titleList = [...matchMap.keys()].slice(0, 20);
+	const context = titleList.map(t => `- ${t}`).join('\n');
+
+	let rankedMatches: Array<{ title: string; relevance: string }> = titleList.map(t => ({ title: t, relevance: '' }));
+	try {
+		const ranked = await callOllamaStructured<FindResult>({
+			ollamaUrl: config.ollamaUrl,
+			model,
+			messages: [{ role: 'user', content: Prompts.findRankResults(query, context) }],
 			format: FIND_SCHEMA,
 		});
+		rankedMatches = ranked.matches;
+	} catch { /* use blank relevance */ }
 
-		const matchLines = result.matches
-			.map(m => `- [[${m.title}]] — ${m.relevance}`)
-			.join('\n');
+	const candidates: FindCandidate[] = rankedMatches.map(m => ({
+		title: m.title,
+		relevance: m.relevance,
+		terms: [...(matchMap.get(m.title) ?? new Set())],
+	}));
 
-		addMessage(
-			'assistant',
-			`**Results for "${query}"**\n\n${result.summary}\n\n**Notes:**\n${matchLines}`
-		);
-	} catch {
-		// Graceful fallback: show raw wikilinks if Ollama is unavailable
-		addMessage('assistant', `Found results for **"${query}"**:\n\n${fallbackLines.join('\n')}`);
-	}
+	// Replace the "Generating search terms…" message with the interactive results
+	addFindResults(query, candidates);
 }
 
 // --- /summarize ---
 
-function extractText(html: string): string {
-	let text = html.replace(/<(script|style|nav|header|footer|noscript)[^>]*>[\s\S]*?<\/\1>/gi, '');
-	text = text.replace(/<\/(p|h[1-6]|li|tr|div|br)>/gi, '\n');
-	text = text.replace(/<[^>]+>/g, '');
-	text = text
-		.replace(/&amp;/g, '&')
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&nbsp;/g, ' ');
-	return text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
-}
-
-const TRANSCRIPT_SERVER = 'http://127.0.0.1:11435/transcript';
-
-function extractYouTubeId(url: string): string | null {
-	try {
-		const parsed = new URL(url);
-		if (parsed.hostname.includes('youtube.com')) return parsed.searchParams.get('v');
-		if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1) || null;
-	} catch { /* invalid URL */ }
-	return null;
-}
-
-async function summarizeYouTube(
-	url: string,
-	model: string,
-	addMessage: AddMessage
-): Promise<void> {
-	const videoId = extractYouTubeId(url);
-	if (!videoId) {
-		addMessage('assistant', 'Could not parse a YouTube video ID from that URL.');
-		return;
-	}
-
-	let transcript: string;
-	try {
-		const response = await fetch(`${TRANSCRIPT_SERVER}?video_id=${encodeURIComponent(videoId)}`);
-		const data = await response.json() as { transcript?: string; error?: string };
-		if (!response.ok) {
-			addMessage('assistant', data.error ?? `Transcript server returned HTTP ${response.status}.`);
-			return;
-		}
-		if (!data.transcript || data.transcript.trim().length < 100) {
-			addMessage('assistant', 'No usable transcript available for this video.');
-			return;
-		}
-		transcript = data.transcript;
-	} catch {
-		addMessage(
-			'assistant',
-			'Could not reach the transcript server.\n\nTo enable YouTube summaries, start the local server:\n```\npip install youtube-transcript-api\npython3 transcript_server.py\n```'
-		);
-		return;
-	}
-
-	const summary = await mapReduceSummarize(transcript, model, 'YouTube video');
-	addMessage('assistant', summary);
-}
-
-async function summarizeArticle(
-	url: string,
-	model: string,
-	addMessage: AddMessage
-): Promise<void> {
-	let html: string;
-	try {
-		const response = await fetch(url);
-		if (!response.ok) {
-			addMessage('assistant', `${url} returned HTTP ${response.status}.`);
-			return;
-		}
-		html = await response.text();
-	} catch {
-		addMessage('assistant', `Could not reach ${url}. Check your internet connection.`);
-		return;
-	}
-
-	const text = extractText(html);
-	if (text.length < 100) {
-		addMessage('assistant', 'Could not extract readable text from that URL. The page may require JavaScript or authentication.');
-		return;
-	}
-
-	const summary = await mapReduceSummarize(text, model, 'article');
-	addMessage('assistant', summary);
-}
-
 export async function executeSummarize(
 	args: string,
 	addMessage: AddMessage,
-	model: string
+	replaceMessage: ReplaceMessage,
+	model: string,
+	config: CommandConfig
 ): Promise<void> {
 	const url = args.trim();
 	if (!url || !/^https?:\/\//.test(url)) {
@@ -333,18 +343,160 @@ export async function executeSummarize(
 		return;
 	}
 
+	const isYouTube = /youtube\.com|youtu\.be/.test(url);
 	addMessage('assistant', `Fetching content from ${url}…`);
 
-	const isYouTube = /youtube\.com|youtu\.be/.test(url);
+	try {
+		let summary: string;
+		if (isYouTube) {
+			replaceMessage('assistant', 'Fetching transcript…');
+			summary = await fetchAndSummarizeYouTube(url, model, config);
+		} else {
+			replaceMessage('assistant', 'Fetching page…');
+			summary = await fetchAndSummarizeArticle(url, model, config.ollamaUrl);
+		}
+		replaceMessage('assistant', summary);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (isYouTube && (msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('Failed to fetch'))) {
+			replaceMessage(
+				'assistant',
+				'Could not reach the transcript server.\n\nTo enable YouTube summaries, start the local server:\n```\npip install youtube-transcript-api\npython3 transcript_server.py\n```'
+			);
+		} else {
+			replaceMessage('assistant', `Failed to summarize: ${msg}`);
+		}
+	}
+}
 
+// --- /clip ---
+
+interface ClipMetadata {
+	title: string;
+	tags: string[];
+}
+
+const CLIP_SCHEMA = {
+	type: 'object',
+	properties: {
+		title: { type: 'string' },
+		tags: { type: 'array', items: { type: 'string' } },
+	},
+	required: ['title', 'tags'],
+};
+
+export async function executeClip(
+	args: string,
+	app: App,
+	addMessage: AddMessage,
+	replaceMessage: ReplaceMessage,
+	model: string,
+	config: CommandConfig,
+	clipsFolder: string
+): Promise<void> {
+	const url = args.trim();
+	if (!url || !/^https?:\/\//.test(url)) {
+		addMessage('assistant', 'Usage: `/clip <url>` — fetches, summarizes, and saves to your Clips folder.\n\nExample: `/clip https://example.com/article`');
+		return;
+	}
+
+	const isYouTube = /youtube\.com|youtu\.be/.test(url);
+	addMessage('assistant', 'Fetching…');
+
+	let summary: string;
 	try {
 		if (isYouTube) {
-			await summarizeYouTube(url, model, addMessage);
+			replaceMessage('assistant', 'Fetching transcript…');
+			summary = await fetchAndSummarizeYouTube(url, model, config);
 		} else {
-			await summarizeArticle(url, model, addMessage);
+			replaceMessage('assistant', 'Fetching page…');
+			summary = await fetchAndSummarizeArticle(url, model, config.ollamaUrl);
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		addMessage('assistant', `Failed to summarize: ${msg}`);
+		if (isYouTube && (msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('Failed to fetch'))) {
+			replaceMessage(
+				'assistant',
+				'Could not reach the transcript server.\n\nTo enable YouTube clips, start the local server:\n```\npip install youtube-transcript-api\npython3 transcript_server.py\n```'
+			);
+		} else {
+			replaceMessage('assistant', `Failed to fetch: ${msg}`);
+		}
+		return;
+	}
+
+	replaceMessage('assistant', 'Extracting metadata…');
+	let meta: ClipMetadata;
+	try {
+		meta = await callOllamaStructured<ClipMetadata>({
+			ollamaUrl: config.ollamaUrl,
+			model,
+			messages: [{ role: 'user', content: Prompts.clipMetadata(summary) }],
+			format: CLIP_SCHEMA,
+		});
+	} catch {
+		meta = { title: new URL(url).hostname, tags: ['clip'] };
+	}
+
+	const date = new Date().toISOString().slice(0, 10);
+	const safeTitle = sanitizeFilename(meta.title);
+	const filename = `${date} - ${safeTitle}`;
+	const yamlTags = buildYamlTags(['clip', ...meta.tags]);
+	const noteContent = `---\nsource: "${url}"\ndate: ${date}\ntags:\n${yamlTags}\n---\n\n${summary}`;
+
+	replaceMessage('assistant', 'Saving…');
+	try {
+		const folderExists = app.vault.getAbstractFileByPath(clipsFolder);
+		if (!folderExists) {
+			await app.vault.createFolder(clipsFolder);
+		}
+		const filePath = `${clipsFolder}/${filename}.md`;
+		const existing = app.vault.getAbstractFileByPath(filePath);
+		if (existing instanceof TFile) {
+			await app.vault.modify(existing, noteContent);
+		} else {
+			await app.vault.create(filePath, noteContent);
+		}
+		replaceMessage('assistant', `Saved to **[[${filename}]]**`);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		replaceMessage('assistant', `Failed to save note: ${msg}`);
+	}
+}
+
+// --- /read ---
+
+export async function executeRead(
+	args: string,
+	app: App,
+	addMessage: AddMessage,
+	model: string,
+	config: CommandConfig
+): Promise<void> {
+	const file = app.workspace.getActiveFile();
+	if (!file) {
+		addMessage('assistant', 'No active note. Open a note in the editor first, then run `/read`.');
+		return;
+	}
+
+	const content = await app.vault.cachedRead(file);
+	if (!content || content.trim().length < 10) {
+		addMessage('assistant', `The active note **${file.basename}** appears to be empty.`);
+		return;
+	}
+
+	const question = args.trim();
+	if (!question) {
+		addMessage('assistant', `Summarizing **${file.basename}**…`);
+		const summary = await mapReduceSummarize(content, model, `note "${file.basename}"`, config.ollamaUrl);
+		addMessage('assistant', summary);
+	} else {
+		addMessage('assistant', `Reading **${file.basename}**…`);
+		const answer = await callOllama({
+			ollamaUrl: config.ollamaUrl,
+			model,
+			messages: [{ role: 'user', content: Prompts.readQuestion(question, content) }],
+		});
+		addMessage('assistant', answer);
 	}
 }

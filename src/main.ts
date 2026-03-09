@@ -1,16 +1,16 @@
 import { Plugin, WorkspaceLeaf } from 'obsidian';
-import { DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab } from './settings';
+import { AIAgentSettings, DEFAULT_SETTINGS, AIAgentSettingTab } from './settings';
 import { ChatView, VIEW_TYPE_AI_CHAT } from './ui/ChatView';
 
 export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+	settings: AIAgentSettings;
 
 	async onload() {
 		await this.loadSettings();
 
 		this.registerView(
 			VIEW_TYPE_AI_CHAT,
-			(leaf) => new ChatView(leaf)
+			(leaf) => new ChatView(leaf, this.settings)
 		);
 
 		this.addRibbonIcon('bot', 'Open AI Agent', () => {
@@ -25,7 +25,7 @@ export default class MyPlugin extends Plugin {
 			},
 		});
 
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.addSettingTab(new AIAgentSettingTab(this.app, this));
 	}
 
 	onunload() {
@@ -48,7 +48,7 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<AIAgentSettings>);
 	}
 
 	async saveSettings() {

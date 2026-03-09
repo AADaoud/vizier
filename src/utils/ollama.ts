@@ -1,21 +1,21 @@
-const OLLAMA_URL = 'http://localhost:11434/api/chat';
-
 interface OllamaMessage {
 	role: string;
 	content: string;
 }
 
 export interface OllamaRequest {
+	ollamaUrl: string;
 	model: string;
 	messages: OllamaMessage[];
 	format?: Record<string, unknown>;
 }
 
 export async function callOllama(req: OllamaRequest): Promise<string> {
-	const response = await fetch(OLLAMA_URL, {
+	const { ollamaUrl, ...body } = req;
+	const response = await fetch(`${ollamaUrl}/api/chat`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ ...req, stream: false }),
+		body: JSON.stringify({ ...body, stream: false }),
 	});
 
 	if (!response.ok) {

@@ -1,4 +1,5 @@
 import { callOllama } from './ollama';
+import { Prompts } from '../prompts';
 
 const CHUNK_SIZE = 3000;
 const THRESHOLD = 4000;
@@ -15,7 +16,6 @@ export function chunkText(text: string, maxChars: number): string[] {
 			chunks.push(text.slice(start));
 			break;
 		}
-		// Find last space within the window to avoid cutting mid-word
 		const lastSpace = text.lastIndexOf(' ', end);
 		const splitAt = lastSpace > start ? lastSpace : end;
 		chunks.push(text.slice(start, splitAt).trim());
@@ -28,46 +28,33 @@ export function chunkText(text: string, maxChars: number): string[] {
 export async function mapReduceSummarize(
 	text: string,
 	model: string,
-	sourceLabel: string
+	sourceLabel: string,
+	ollamaUrl: string
 ): Promise<string> {
 	if (text.length <= THRESHOLD) {
 		return callOllama({
+			ollamaUrl,
 			model,
-			messages: [
-				{
-					role: 'user',
-					content: `Summarize the following ${sourceLabel}. Provide a concise summary covering the main points.\n\nContent:\n${text}`,
-				},
-			],
+			messages: [{ role: 'user', content: Prompts.summarizeFull(sourceLabel, text) }],
 		});
 	}
 
 	const chunks = chunkText(text, CHUNK_SIZE);
 
-	// Map: summarize each chunk individually (serial to avoid overwhelming Ollama)
 	const chunkSummaries: string[] = [];
 	for (const chunk of chunks) {
 		const summary = await callOllama({
+			ollamaUrl,
 			model,
-			messages: [
-				{
-					role: 'user',
-					content: `Summarize this section of a ${sourceLabel} in 2-3 sentences:\n\n${chunk}`,
-				},
-			],
+			messages: [{ role: 'user', content: Prompts.summarizeChunk(sourceLabel, chunk) }],
 		});
 		chunkSummaries.push(summary);
 	}
 
-	// Reduce: combine all chunk summaries into one
 	const combined = chunkSummaries.join('\n\n');
 	return callOllama({
+		ollamaUrl,
 		model,
-		messages: [
-			{
-				role: 'user',
-				content: `The following are section summaries of a ${sourceLabel}. Combine them into one cohesive summary covering the main points:\n\n${combined}`,
-			},
-		],
+		messages: [{ role: 'user', content: Prompts.summarizeCombine(sourceLabel, combined) }],
 	});
 }

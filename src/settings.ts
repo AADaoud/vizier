@@ -1,15 +1,21 @@
-import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import { App, PluginSettingTab, Setting } from 'obsidian';
+import MyPlugin from './main';
 
-export interface MyPluginSettings {
-	mySetting: string;
+export interface AIAgentSettings {
+	ollamaUrl: string;
+	defaultModel: string;
+	transcriptServerUrl: string;
+	clipsFolder: string;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+export const DEFAULT_SETTINGS: AIAgentSettings = {
+	ollamaUrl: 'http://localhost:11434',
+	defaultModel: 'gemma3:4b',
+	transcriptServerUrl: 'http://127.0.0.1:11435',
+	clipsFolder: 'Clips',
+};
 
-export class SampleSettingTab extends PluginSettingTab {
+export class AIAgentSettingTab extends PluginSettingTab {
 	plugin: MyPlugin;
 
 	constructor(app: App, plugin: MyPlugin) {
@@ -18,18 +24,50 @@ export class SampleSettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
-		const {containerEl} = this;
-
+		const { containerEl } = this;
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc('It\'s a secret')
+			.setName('Ollama URL')
+			.setDesc('Base URL of your Ollama instance.')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder('http://localhost:11434')
+				.setValue(this.plugin.settings.ollamaUrl)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.ollamaUrl = value.trim() || DEFAULT_SETTINGS.ollamaUrl;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Default model')
+			.setDesc('Ollama model name used by default (e.g. gemma3:4b, llama3.2).')
+			.addText(text => text
+				.setPlaceholder('gemma3:4b')
+				.setValue(this.plugin.settings.defaultModel)
+				.onChange(async (value) => {
+					this.plugin.settings.defaultModel = value.trim() || DEFAULT_SETTINGS.defaultModel;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Transcript server URL')
+			.setDesc('Base URL of the local YouTube transcript server (transcript_server.py).')
+			.addText(text => text
+				.setPlaceholder('http://127.0.0.1:11435')
+				.setValue(this.plugin.settings.transcriptServerUrl)
+				.onChange(async (value) => {
+					this.plugin.settings.transcriptServerUrl = value.trim() || DEFAULT_SETTINGS.transcriptServerUrl;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Clips folder')
+			.setDesc('Vault folder where /clip saves notes.')
+			.addText(text => text
+				.setPlaceholder('Clips')
+				.setValue(this.plugin.settings.clipsFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.clipsFolder = value.trim() || DEFAULT_SETTINGS.clipsFolder;
 					await this.plugin.saveSettings();
 				}));
 	}

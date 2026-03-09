@@ -1,25 +1,34 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../context';
+import { AIAgentSettings } from '../settings';
+import { MarkdownMessage } from './MarkdownMessage';
+import { FindResultsMessage } from './FindResultsMessage';
 import {
 	SLASH_COMMANDS,
 	SlashCommand,
+	CommandConfig,
+	FindCandidate,
 	executeWrite,
 	executeFind,
 	executeSummarize,
+	executeClip,
+	executeRead,
 } from '../commands/slashCommands';
 
 interface Message {
 	role: 'user' | 'assistant';
 	content: string;
+	findResults?: { query: string; candidates: FindCandidate[] };
 }
 
-const OLLAMA_URL = 'http://localhost:11434/api/chat';
-const DEFAULT_MODEL = 'gemma3:4b';
+interface ChatAppProps {
+	settings: AIAgentSettings;
+}
 
 function getCommandFilter(input: string): string | null {
 	if (!input.startsWith('/')) return null;
 	const space = input.indexOf(' ');
-	return space === -1 ? input.slice(1) : null; // only show picker while no space yet
+	return space === -1 ? input.slice(1) : null;
 }
 
 function parseCommand(input: string): { id: string; args: string } | null {
@@ -29,19 +38,48 @@ function parseCommand(input: string): { id: string; args: string } | null {
 	return { id: input.slice(1, space), args: input.slice(space + 1) };
 }
 
-export const ChatApp = () => {
+const CopyButton = ({ content }: { content: string }) => {
+	const [copied, setCopied] = useState(false);
+
+	const handleCopy = async () => {
+		await navigator.clipboard.writeText(content);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 1500);
+	};
+
+	return (
+		<button
+			className="ai-chat-copy-btn"
+			onClick={() => void handleCopy()}
+			title="Copy message"
+		>
+			{copied ? 'Copied' : 'Copy'}
+		</button>
+	);
+};
+
+const DotBounce = () => (
+	<div className="ai-chat-dot-bounce">
+		<span /><span /><span />
+	</div>
+);
+
+export const ChatApp = ({ settings }: ChatAppProps) => {
 	const app = useApp();
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [input, setInput] = useState('');
-	const [loading, setLoading] = useState(false);
-	const [model, setModel] = useState(DEFAULT_MODEL);
+	const [commandLoading, setCommandLoading] = useState(false);
+	const [streaming, setStreaming] = useState(false);
+	const [model, setModel] = useState(settings.defaultModel);
 	const [pickerIndex, setPickerIndex] = useState(0);
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+	const isLoading = commandLoading || streaming;
+
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-	}, [messages, loading]);
+	}, [messages, commandLoading, streaming]);
 
 	const commandFilter = getCommandFilter(input);
 	const visibleCommands: SlashCommand[] =
@@ -50,7 +88,6 @@ export const ChatApp = () => {
 			: [];
 	const showPicker = visibleCommands.length > 0;
 
-	// Reset picker selection when filtered list changes
 	useEffect(() => {
 		setPickerIndex(0);
 	}, [commandFilter]);
@@ -59,81 +96,175 @@ export const ChatApp = () => {
 		setMessages(prev => [...prev, { role, content }]);
 	}, []);
 
+	const replaceLastMessage = useCallback((role: 'user' | 'assistant', content: string) => {
+		setMessages(prev => {
+			const last = prev[prev.length - 1];
+			if (last?.role === role) return [...prev.slice(0, -1), { role, content }];
+			return [...prev, { role, content }];
+		});
+	}, []);
+
+	const addFindResults = useCallback((query: string, candidates: FindCandidate[]) => {
+		setMessages(prev => {
+			// Replace last assistant message if it's a placeholder (e.g. "Generating search terms…")
+			const last = prev[prev.length - 1];
+			if (last?.role === 'assistant' && !last.findResults) {
+				return [...prev.slice(0, -1), { role: 'assistant', content: '', findResults: { query, candidates } }];
+			}
+			return [...prev, { role: 'assistant', content: '', findResults: { query, candidates } }];
+		});
+	}, []);
+
+	const clearChat = useCallback(() => {
+		setMessages([]);
+	}, []);
+
+	// Auto-resize textarea
+	const handleTextareaInput = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+		const el = e.currentTarget;
+		el.style.height = 'auto';
+		el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+	};
+
+	// Streaming chat — only for freeform messages
 	const sendToOllama = useCallback(async (history: Message[], userContent: string) => {
-		setLoading(true);
-		const prompt = userContent;
-		const allMessages = [...history, { role: 'user' as const, content: prompt }];
+		setStreaming(true);
+		setMessages(prev => [
+			...prev,
+			{ role: 'user', content: userContent },
+			{ role: 'assistant', content: '' },
+		]);
+
 		try {
-			const response = await fetch(OLLAMA_URL, {
+			const response = await fetch(`${settings.ollamaUrl}/api/chat`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					model,
-					messages: allMessages.map(m => ({ role: m.role, content: m.content })),
-					stream: false,
+					messages: [
+						...history.map(m => ({ role: m.role, content: m.content })),
+						{ role: 'user', content: userContent },
+					],
+					stream: true,
 				}),
 			});
+
 			if (!response.ok) throw new Error(`HTTP ${response.status}`);
-			const data = await response.json() as { message?: { content?: string } };
-			addMessage('assistant', data.message?.content ?? '(no response)');
+			if (!response.body) throw new Error('No response body');
+
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder();
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				const chunk = decoder.decode(value, { stream: true });
+				for (const line of chunk.split('\n')) {
+					if (!line.trim()) continue;
+					try {
+						const parsed = JSON.parse(line) as { message?: { content?: string } };
+						const token = parsed.message?.content ?? '';
+						if (token) {
+							setMessages(prev => {
+								const last = prev[prev.length - 1];
+								if (last?.role === 'assistant') {
+									return [...prev.slice(0, -1), { role: 'assistant', content: last.content + token }];
+								}
+								return prev;
+							});
+						}
+					} catch { /* partial JSON line */ }
+				}
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			addMessage('assistant', `Error: ${msg}`);
+			setMessages(prev => {
+				const last = prev[prev.length - 1];
+				if (last?.role === 'assistant' && last.content === '') {
+					return [...prev.slice(0, -1), { role: 'assistant', content: `Error: ${msg}` }];
+				}
+				return [...prev, { role: 'assistant', content: `Error: ${msg}` }];
+			});
 		} finally {
-			setLoading(false);
+			setStreaming(false);
 		}
-	}, [model, addMessage]);
+	}, [model, settings.ollamaUrl]);
 
 	const handleSend = useCallback(async () => {
 		const text = input.trim();
-		if (!text || loading) return;
+		if (!text || isLoading) return;
 		setInput('');
+		// Reset textarea height
+		if (textareaRef.current) {
+			textareaRef.current.style.height = 'auto';
+		}
 
 		const parsed = parseCommand(text);
+		const config: CommandConfig = {
+			ollamaUrl: settings.ollamaUrl,
+			transcriptServerUrl: settings.transcriptServerUrl,
+		};
 
 		if (parsed) {
 			addMessage('user', text);
 
 			if (parsed.id === 'write') {
-				setLoading(true);
+				setCommandLoading(true);
 				try {
-					await executeWrite(parsed.args, app, addMessage, model);
+					await executeWrite(parsed.args, app, addMessage, model, config);
 				} finally {
-					setLoading(false);
+					setCommandLoading(false);
 				}
 				return;
 			}
 
 			if (parsed.id === 'find') {
-				setLoading(true);
+				setCommandLoading(true);
 				try {
-					await executeFind(parsed.args, app, addMessage, model);
+					await executeFind(parsed.args, app, addMessage, addFindResults, model, config);
 				} finally {
-					setLoading(false);
+					setCommandLoading(false);
 				}
 				return;
 			}
 
 			if (parsed.id === 'summarize') {
-				setLoading(true);
+				setCommandLoading(true);
 				try {
-					await executeSummarize(parsed.args, addMessage, model);
+					await executeSummarize(parsed.args, addMessage, replaceLastMessage, model, config);
 				} finally {
-					setLoading(false);
+					setCommandLoading(false);
 				}
 				return;
 			}
 
-			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /find, /summarize`);
+			if (parsed.id === 'clip') {
+				setCommandLoading(true);
+				try {
+					await executeClip(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.clipsFolder);
+				} finally {
+					setCommandLoading(false);
+				}
+				return;
+			}
+
+			if (parsed.id === 'read') {
+				setCommandLoading(true);
+				try {
+					await executeRead(parsed.args, app, addMessage, model, config);
+				} finally {
+					setCommandLoading(false);
+				}
+				return;
+			}
+
+			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /find, /summarize, /clip, /read`);
 			return;
 		}
 
-		// Regular chat message
-		const userMsg: Message = { role: 'user', content: text };
-		const history = [...messages, userMsg];
-		setMessages(history);
+		// Regular streaming chat
 		await sendToOllama(messages, text);
-	}, [input, loading, messages, app, addMessage, sendToOllama]);
+	}, [input, isLoading, messages, app, model, settings, addMessage, addFindResults, replaceLastMessage, sendToOllama]);
 
 	const selectCommand = (cmd: SlashCommand) => {
 		setInput(cmd.template);
@@ -170,6 +301,10 @@ export const ChatApp = () => {
 		}
 	};
 
+	// Determine if the last assistant message is empty (streaming placeholder)
+	const lastMsg = messages[messages.length - 1];
+	const showStreamingCursor = streaming && lastMsg?.role === 'assistant' && lastMsg.content === '';
+
 	return (
 		<div className="ai-chat-container">
 			<div className="ai-chat-header">
@@ -182,14 +317,21 @@ export const ChatApp = () => {
 					title="Ollama model name"
 					placeholder="Model"
 				/>
+				<button
+					className="ai-chat-clear-btn"
+					onClick={clearChat}
+					title="Clear chat"
+				>
+					Clear
+				</button>
 			</div>
 
 			<div className="ai-chat-messages">
 				{messages.length === 0 && (
 					<div className="ai-chat-empty">
-						<p>Ask me anything about your vault.</p>
+						<p>Ask me anything, or use a command.</p>
 						<p className="ai-chat-hint">
-							Type <code>/</code> for commands: <code>/write</code>, <code>/find</code>, <code>/summarize</code>
+							<code>/write</code> <code>/find</code> <code>/summarize</code> <code>/clip</code> <code>/read</code>
 						</p>
 					</div>
 				)}
@@ -198,13 +340,36 @@ export const ChatApp = () => {
 						<span className="ai-chat-message-role">
 							{msg.role === 'user' ? 'You' : 'AI'}
 						</span>
-						<p className="ai-chat-message-content">{msg.content}</p>
+						<div className="ai-chat-message-inner">
+							{msg.role === 'assistant' ? (
+								msg.findResults ? (
+									<FindResultsMessage query={msg.findResults.query} candidates={msg.findResults.candidates} />
+								) : (
+									<MarkdownMessage content={msg.content} />
+								)
+							) : (
+								<p className="ai-chat-message-content">{msg.content}</p>
+							)}
+							{msg.role === 'assistant' && msg.content && !msg.findResults && (
+								<CopyButton content={msg.content} />
+							)}
+						</div>
 					</div>
 				))}
-				{loading && (
+				{showStreamingCursor && (
 					<div className="ai-chat-message ai-chat-message--assistant">
 						<span className="ai-chat-message-role">AI</span>
-						<p className="ai-chat-message-content ai-chat-loading">Thinking…</p>
+						<div className="ai-chat-markdown-body">
+							<span className="ai-chat-streaming-cursor" />
+						</div>
+					</div>
+				)}
+				{commandLoading && (
+					<div className="ai-chat-message ai-chat-message--assistant">
+						<span className="ai-chat-message-role">AI</span>
+						<div className="ai-chat-markdown-body">
+							<DotBounce />
+						</div>
 					</div>
 				)}
 				<div ref={bottomRef} />
@@ -232,17 +397,19 @@ export const ChatApp = () => {
 						className="ai-chat-textarea"
 						value={input}
 						onChange={e => setInput(e.target.value)}
+						onInput={handleTextareaInput}
 						onKeyDown={handleKeyDown}
 						placeholder="Message… or type / for commands"
-						rows={3}
-						disabled={loading}
+						rows={1}
+						disabled={isLoading}
 					/>
 					<button
 						className="ai-chat-send-btn"
 						onClick={() => void handleSend()}
-						disabled={loading || !input.trim()}
+						disabled={isLoading || !input.trim()}
+						title="Send"
 					>
-						Send
+						➤
 					</button>
 				</div>
 			</div>
