@@ -1,5 +1,4 @@
 import { App, TFile } from 'obsidian';
-import TranscriptClient, { TranscriptResult } from 'youtube-transcript-api';
 import { callOllamaStructured } from '../utils/ollama';
 import { mapReduceSummarize } from '../utils/chunking';
 
@@ -248,18 +247,14 @@ function extractText(html: string): string {
 	return text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
 }
 
+const TRANSCRIPT_SERVER = 'http://127.0.0.1:11435/transcript';
+
 function extractYouTubeId(url: string): string | null {
 	try {
 		const parsed = new URL(url);
-		if (parsed.hostname.includes('youtube.com')) {
-			return parsed.searchParams.get('v');
-		}
-		if (parsed.hostname === 'youtu.be') {
-			return parsed.pathname.slice(1) || null;
-		}
-	} catch {
-		// invalid URL
-	}
+		if (parsed.hostname.includes('youtube.com')) return parsed.searchParams.get('v');
+		if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1) || null;
+	} catch { /* invalid URL */ }
 	return null;
 }
 
@@ -274,41 +269,28 @@ async function summarizeYouTube(
 		return;
 	}
 
-	let result: TranscriptResult;
+	let transcript: string;
 	try {
-		const client = new TranscriptClient();
-		await client.ready;
-		result = await client.getTranscript(videoId);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		if (msg === 'invalid video ID') {
-			addMessage('assistant', 'Could not find that YouTube video.');
-		} else {
-			addMessage('assistant', 'Could not reach YouTube. Check your internet connection.');
+		const response = await fetch(`${TRANSCRIPT_SERVER}?video_id=${encodeURIComponent(videoId)}`);
+		const data = await response.json() as { transcript?: string; error?: string };
+		if (!response.ok) {
+			addMessage('assistant', data.error ?? `Transcript server returned HTTP ${response.status}.`);
+			return;
 		}
+		if (!data.transcript || data.transcript.trim().length < 100) {
+			addMessage('assistant', 'No usable transcript available for this video.');
+			return;
+		}
+		transcript = data.transcript;
+	} catch {
+		addMessage(
+			'assistant',
+			'Could not reach the transcript server.\n\nTo enable YouTube summaries, start the local server:\n```\npip install youtube-transcript-api\npython3 transcript_server.py\n```'
+		);
 		return;
 	}
 
-	if (
-		result.playabilityStatus.status === 'LOGIN_REQUIRED' ||
-		result.failedReason === 'PLAYABILITY_STATUS_NOK'
-	) {
-		addMessage('assistant', 'Could not find that YouTube video.');
-		return;
-	}
-
-	let text: string;
-	const firstTrack = result.tracks.length > 0 ? result.tracks[0] : undefined;
-
-	if (!firstTrack || firstTrack.transcript.length === 0) {
-		addMessage('assistant', 'No transcript available for this video. Summarizing from title/description instead.');
-		const description = result.microformat?.playerMicroformatRenderer?.description?.simpleText ?? '';
-		text = `Title: ${result.title}\n\n${description}`;
-	} else {
-		text = firstTrack.transcript.map(s => s.text).join(' ');
-	}
-
-	const summary = await mapReduceSummarize(text, model, 'YouTube video');
+	const summary = await mapReduceSummarize(transcript, model, 'YouTube video');
 	addMessage('assistant', summary);
 }
 
