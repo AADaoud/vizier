@@ -52,6 +52,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		template: '/clip ',
 	},
 	{
+		id: 'clip long',
+		label: '/clip long',
+		description: 'Clip and save detailed notes — ideal for lectures or classes',
+		template: '/clip long ',
+	},
+	{
 		id: 'read',
 		label: '/read',
 		description: 'Summarize or ask a question about the active note',
@@ -85,19 +91,6 @@ function buildYamlTags(tags: string[]): string {
 		.join('\n');
 }
 
-function extractText(html: string): string {
-	let text = html.replace(/<(script|style|nav|header|footer|noscript)[^>]*>[\s\S]*?<\/\1>/gi, '');
-	text = text.replace(/<\/(p|h[1-6]|li|tr|div|br)>/gi, '\n');
-	text = text.replace(/<[^>]+>/g, '');
-	text = text
-		.replace(/&amp;/g, '&')
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&nbsp;/g, ' ');
-	return text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
-}
 
 function extractYouTubeId(url: string): string | null {
 	try {
@@ -108,7 +101,7 @@ function extractYouTubeId(url: string): string | null {
 	return null;
 }
 
-async function fetchAndSummarizeYouTube(url: string, model: string, config: CommandConfig): Promise<string> {
+async function fetchAndSummarizeYouTube(url: string, model: string, config: CommandConfig, detailed = false): Promise<string> {
 	const videoId = extractYouTubeId(url);
 	if (!videoId) throw new Error('Could not parse a YouTube video ID from that URL.');
 
@@ -121,18 +114,26 @@ async function fetchAndSummarizeYouTube(url: string, model: string, config: Comm
 		throw new Error('No usable transcript available for this video.');
 	}
 
-	return mapReduceSummarize(data.transcript, model, 'YouTube video', config.ollamaUrl);
+	return mapReduceSummarize(data.transcript, model, 'YouTube video', config.ollamaUrl, detailed);
 }
 
-async function fetchAndSummarizeArticle(url: string, model: string, ollamaUrl: string): Promise<string> {
-	const response = await fetch(url);
-	if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}.`);
-	const html = await response.text();
-	const text = extractText(html);
+async function fetchAndSummarizeArticle(url: string, model: string, ollamaUrl: string, detailed = false): Promise<string> {
+	// Use Jina AI Reader to fetch a clean, reader-friendly version of the page.
+	// This handles JavaScript-rendered content, paywalls, and encoding issues far
+	// better than fetching raw HTML. No API key required.
+	const jinaUrl = `https://r.jina.ai/${url}`;
+	const response = await fetch(jinaUrl, {
+		headers: {
+			'Accept': 'text/plain',
+			'X-Return-Format': 'markdown',
+		},
+	});
+	if (!response.ok) throw new Error(`Could not retrieve article (HTTP ${response.status}). The page may be blocked or unavailable.`);
+	const text = (await response.text()).trim();
 	if (text.length < 100) {
-		throw new Error('Could not extract readable text from that URL. The page may require JavaScript or authentication.');
+		throw new Error('Could not extract readable text from that URL. The page may require authentication or is not publicly accessible.');
 	}
-	return mapReduceSummarize(text, model, 'article', ollamaUrl);
+	return mapReduceSummarize(text, model, 'article', ollamaUrl, detailed);
 }
 
 // --- /write ---
@@ -158,7 +159,8 @@ export async function executeWrite(
 	app: App,
 	addMessage: AddMessage,
 	model: string,
-	config: CommandConfig
+	config: CommandConfig,
+	aiNotesFolder = ''
 ): Promise<void> {
 	const topic = args.trim();
 	if (!topic) {
@@ -181,8 +183,17 @@ export async function executeWrite(
 	}
 
 	const sanitized = sanitizeFilename(result.filename);
-	const folderPath = app.fileManager.getNewFileParent('').path;
-	const prefix = folderPath === '/' ? '' : `${folderPath}/`;
+	let folderPath: string;
+	if (aiNotesFolder) {
+		folderPath = aiNotesFolder;
+		const folderExists = app.vault.getAbstractFileByPath(aiNotesFolder);
+		if (!folderExists) {
+			await app.vault.createFolder(aiNotesFolder);
+		}
+	} else {
+		folderPath = app.fileManager.getNewFileParent('').path;
+	}
+	const prefix = folderPath === '/' || folderPath === '' ? '' : `${folderPath}/`;
 	const filePath = `${prefix}${sanitized}.md`;
 
 	const yamlTags = buildYamlTags(result.tags);
@@ -361,7 +372,7 @@ export async function executeSummarize(
 		if (isYouTube && (msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('Failed to fetch'))) {
 			replaceMessage(
 				'assistant',
-				'Could not reach the transcript server.\n\nTo enable YouTube summaries, start the local server:\n```\npip install youtube-transcript-api\npython3 transcript_server.py\n```'
+				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
 			);
 		} else {
 			replaceMessage('assistant', `Failed to summarize: ${msg}`);
@@ -394,30 +405,32 @@ export async function executeClip(
 	config: CommandConfig,
 	clipsFolder: string
 ): Promise<void> {
-	const url = args.trim();
+	const detailed = args.startsWith('long ');
+	const url = (detailed ? args.slice(5) : args).trim();
 	if (!url || !/^https?:\/\//.test(url)) {
-		addMessage('assistant', 'Usage: `/clip <url>` — fetches, summarizes, and saves to your Clips folder.\n\nExample: `/clip https://example.com/article`');
+		addMessage('assistant', 'Usage: `/clip <url>` or `/clip long <url>` — fetches, summarizes, and saves to your Clips folder.\n\nUse `/clip long` for detailed lecture or class notes.');
 		return;
 	}
 
 	const isYouTube = /youtube\.com|youtu\.be/.test(url);
-	addMessage('assistant', 'Fetching…');
+	const modeLabel = detailed ? 'detailed notes' : 'summary';
+	addMessage('assistant', `Fetching ${modeLabel}…`);
 
 	let summary: string;
 	try {
 		if (isYouTube) {
 			replaceMessage('assistant', 'Fetching transcript…');
-			summary = await fetchAndSummarizeYouTube(url, model, config);
+			summary = await fetchAndSummarizeYouTube(url, model, config, detailed);
 		} else {
 			replaceMessage('assistant', 'Fetching page…');
-			summary = await fetchAndSummarizeArticle(url, model, config.ollamaUrl);
+			summary = await fetchAndSummarizeArticle(url, model, config.ollamaUrl, detailed);
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		if (isYouTube && (msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('Failed to fetch'))) {
 			replaceMessage(
 				'assistant',
-				'Could not reach the transcript server.\n\nTo enable YouTube clips, start the local server:\n```\npip install youtube-transcript-api\npython3 transcript_server.py\n```'
+				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
 			);
 		} else {
 			replaceMessage('assistant', `Failed to fetch: ${msg}`);

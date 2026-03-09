@@ -6,6 +6,7 @@ export interface AIAgentSettings {
 	defaultModel: string;
 	transcriptServerUrl: string;
 	clipsFolder: string;
+	aiNotesFolder: string;
 }
 
 export const DEFAULT_SETTINGS: AIAgentSettings = {
@@ -13,6 +14,7 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	defaultModel: 'gemma3:4b',
 	transcriptServerUrl: 'http://127.0.0.1:11435',
 	clipsFolder: 'Clips',
+	aiNotesFolder: '',
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {
@@ -68,6 +70,17 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.clipsFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.clipsFolder = value.trim() || DEFAULT_SETTINGS.clipsFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('AI notes folder')
+			.setDesc('Vault folder where /write saves AI-generated notes. Leave blank to use the default new-file location.')
+			.addText(text => text
+				.setPlaceholder('(default new-file location)')
+				.setValue(this.plugin.settings.aiNotesFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.aiNotesFolder = value.trim();
 					await this.plugin.saveSettings();
 				}));
 	}

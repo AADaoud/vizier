@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+	"id": "vizier",
+	"name": "Vizier",
+	"version": "0.2.2",
+	"minAppVersion": "1.4.0",
+	"description": "Vizier — a local, privacy-first AI agent for Obsidian powered by Ollama. Chat, write notes, search your vault, summarize YouTube videos and articles, and clip web content.",
+	"author": "AADaoud",
+	"authorUrl": "https://github.com/AADaoud",
+	"isDesktopOnly": true
 }

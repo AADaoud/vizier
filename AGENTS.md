@@ -1,10 +1,31 @@
-# Obsidian community plugin
+# Vizier — agent guide
 
 ## Project overview
 
-- Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
-- Entry point: `main.ts` compiled to `main.js` and loaded by Obsidian.
-- Required release artifacts: `main.js`, `manifest.json`, and optional `styles.css`.
+- **Plugin**: Vizier, a local AI agent for Obsidian powered by Ollama.
+- Target: Obsidian Community Plugin (TypeScript + React → bundled JavaScript).
+- Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
+- Required release artifacts: `main.js`, `manifest.json`, `styles.css`.
+
+## Key features & architecture
+
+| Feature | Entry point |
+|---|---|
+| Chat UI | `src/ui/ChatView.tsx` → `src/ui/ChatApp.tsx` |
+| Slash commands (`/write`, `/find`, `/clip`, `/summarize`, `/read`) | `src/commands/slashCommands.ts` |
+| Settings | `src/settings.ts` |
+| Transcript server auto-setup modal | `src/ui/ServerSetupModal.ts` |
+| AI prompts | `src/prompts.ts` |
+| Ollama API wrapper | `src/utils/ollama.ts` |
+| Map-reduce summarizer | `src/utils/chunking.ts` |
+
+**External services used:**
+- `r.jina.ai` — article fetching (converts any URL to clean markdown; free, no auth)
+- `transcript_server.py` — local Python HTTP server for YouTube transcripts (port 11435)
+
+## Chat history
+
+Persisted in `localStorage` under key `vizier-chat-history` (last 60 messages). Cleared when the user clicks "Clear".
 
 ## Environment & tooling
 

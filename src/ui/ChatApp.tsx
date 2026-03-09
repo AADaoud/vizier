@@ -15,6 +15,9 @@ import {
 	executeRead,
 } from '../commands/slashCommands';
 
+const HISTORY_KEY = 'vizier-chat-history';
+const MAX_HISTORY = 60;
+
 interface Message {
 	role: 'user' | 'assistant';
 	content: string;
@@ -23,6 +26,8 @@ interface Message {
 
 interface ChatAppProps {
 	settings: AIAgentSettings;
+	initialCommand?: string;
+	onRegisterInputInjector?: (fn: (text: string) => void) => void;
 }
 
 function getCommandFilter(input: string): string | null {
@@ -36,6 +41,23 @@ function parseCommand(input: string): { id: string; args: string } | null {
 	const space = input.indexOf(' ');
 	if (space === -1) return { id: input.slice(1), args: '' };
 	return { id: input.slice(1, space), args: input.slice(space + 1) };
+}
+
+function loadHistory(): Message[] {
+	try {
+		const raw = localStorage.getItem(HISTORY_KEY);
+		if (!raw) return [];
+		return JSON.parse(raw) as Message[];
+	} catch {
+		return [];
+	}
+}
+
+function saveHistory(messages: Message[]): void {
+	try {
+		const trimmed = messages.slice(-MAX_HISTORY);
+		localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+	} catch { /* storage full or unavailable */ }
 }
 
 const CopyButton = ({ content }: { content: string }) => {
@@ -64,9 +86,9 @@ const DotBounce = () => (
 	</div>
 );
 
-export const ChatApp = ({ settings }: ChatAppProps) => {
+export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: ChatAppProps) => {
 	const app = useApp();
-	const [messages, setMessages] = useState<Message[]>([]);
+	const [messages, setMessages] = useState<Message[]>(() => loadHistory());
 	const [input, setInput] = useState('');
 	const [commandLoading, setCommandLoading] = useState(false);
 	const [streaming, setStreaming] = useState(false);
@@ -77,9 +99,31 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 
 	const isLoading = commandLoading || streaming;
 
+	// Persist history whenever messages change
+	useEffect(() => {
+		saveHistory(messages);
+	}, [messages]);
+
+	// Scroll to bottom on new messages
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
 	}, [messages, commandLoading, streaming]);
+
+	// Pre-fill input from initialCommand (set when view opens with a pending command)
+	useEffect(() => {
+		if (initialCommand) {
+			setInput(initialCommand);
+			setTimeout(() => textareaRef.current?.focus(), 50);
+		}
+	}, []); // intentionally run only on mount
+
+	// Register the injector so ChatView can push commands into an already-open chat
+	useEffect(() => {
+		onRegisterInputInjector?.((text: string) => {
+			setInput(text);
+			setTimeout(() => textareaRef.current?.focus(), 50);
+		});
+	}, [onRegisterInputInjector]);
 
 	const commandFilter = getCommandFilter(input);
 	const visibleCommands: SlashCommand[] =
@@ -106,7 +150,6 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 
 	const addFindResults = useCallback((query: string, candidates: FindCandidate[]) => {
 		setMessages(prev => {
-			// Replace last assistant message if it's a placeholder (e.g. "Generating search terms…")
 			const last = prev[prev.length - 1];
 			if (last?.role === 'assistant' && !last.findResults) {
 				return [...prev.slice(0, -1), { role: 'assistant', content: '', findResults: { query, candidates } }];
@@ -117,6 +160,7 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 
 	const clearChat = useCallback(() => {
 		setMessages([]);
+		localStorage.removeItem(HISTORY_KEY);
 	}, []);
 
 	// Auto-resize textarea
@@ -194,7 +238,6 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 		const text = input.trim();
 		if (!text || isLoading) return;
 		setInput('');
-		// Reset textarea height
 		if (textareaRef.current) {
 			textareaRef.current.style.height = 'auto';
 		}
@@ -211,7 +254,7 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 			if (parsed.id === 'write') {
 				setCommandLoading(true);
 				try {
-					await executeWrite(parsed.args, app, addMessage, model, config);
+					await executeWrite(parsed.args, app, addMessage, model, config, settings.aiNotesFolder);
 				} finally {
 					setCommandLoading(false);
 				}
@@ -301,14 +344,13 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 		}
 	};
 
-	// Determine if the last assistant message is empty (streaming placeholder)
-	const lastMsg = messages[messages.length - 1];
-	const showStreamingCursor = streaming && lastMsg?.role === 'assistant' && lastMsg.content === '';
+	const lastMsgIndex = messages.length - 1;
+	// No separate cursor/loading blocks — both are rendered inline inside the last bubble.
 
 	return (
 		<div className="ai-chat-container">
 			<div className="ai-chat-header">
-				<span className="ai-chat-title">AI Agent</span>
+				<span className="ai-chat-title">Vizier</span>
 				<span className="ai-chat-vault">{app.vault.getName()}</span>
 				<input
 					className="ai-chat-model-input"
@@ -320,7 +362,7 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 				<button
 					className="ai-chat-clear-btn"
 					onClick={clearChat}
-					title="Clear chat"
+					title="Clear chat history"
 				>
 					Clear
 				</button>
@@ -331,47 +373,46 @@ export const ChatApp = ({ settings }: ChatAppProps) => {
 					<div className="ai-chat-empty">
 						<p>Ask me anything, or use a command.</p>
 						<p className="ai-chat-hint">
-							<code>/write</code> <code>/find</code> <code>/summarize</code> <code>/clip</code> <code>/read</code>
+							<code>/write</code> <code>/find</code> <code>/summarize</code> <code>/clip</code> <code>/clip long</code> <code>/read</code>
 						</p>
 					</div>
 				)}
-				{messages.map((msg, i) => (
-					<div key={i} className={`ai-chat-message ai-chat-message--${msg.role}`}>
-						<span className="ai-chat-message-role">
-							{msg.role === 'user' ? 'You' : 'AI'}
-						</span>
-						<div className="ai-chat-message-inner">
-							{msg.role === 'assistant' ? (
-								msg.findResults ? (
-									<FindResultsMessage query={msg.findResults.query} candidates={msg.findResults.candidates} />
+				{messages.map((msg, i) => {
+					const isLast = i === lastMsgIndex;
+					// Show streaming cursor inside this bubble when streaming hasn't produced text yet
+					const showCursor = isLast && streaming && msg.role === 'assistant' && msg.content === '';
+					// Show dots after status text when a slash command is running
+					const showDots = isLast && commandLoading && msg.role === 'assistant';
+
+					return (
+						<div key={i} className={`ai-chat-message ai-chat-message--${msg.role}`}>
+							<span className="ai-chat-message-role">
+								{msg.role === 'user' ? 'You' : 'AI'}
+							</span>
+							<div className="ai-chat-message-inner">
+								{msg.role === 'assistant' ? (
+									msg.findResults ? (
+										<FindResultsMessage query={msg.findResults.query} candidates={msg.findResults.candidates} />
+									) : showCursor ? (
+										<div className="ai-chat-markdown-body">
+											<span className="ai-chat-streaming-cursor" />
+										</div>
+									) : (
+										<div className="ai-chat-markdown-body-wrap">
+											<MarkdownMessage content={msg.content} />
+											{showDots && <DotBounce />}
+										</div>
+									)
 								) : (
-									<MarkdownMessage content={msg.content} />
-								)
-							) : (
-								<p className="ai-chat-message-content">{msg.content}</p>
-							)}
-							{msg.role === 'assistant' && msg.content && !msg.findResults && (
-								<CopyButton content={msg.content} />
-							)}
+									<p className="ai-chat-message-content">{msg.content}</p>
+								)}
+								{msg.role === 'assistant' && msg.content && !msg.findResults && !showDots && (
+									<CopyButton content={msg.content} />
+								)}
+							</div>
 						</div>
-					</div>
-				))}
-				{showStreamingCursor && (
-					<div className="ai-chat-message ai-chat-message--assistant">
-						<span className="ai-chat-message-role">AI</span>
-						<div className="ai-chat-markdown-body">
-							<span className="ai-chat-streaming-cursor" />
-						</div>
-					</div>
-				)}
-				{commandLoading && (
-					<div className="ai-chat-message ai-chat-message--assistant">
-						<span className="ai-chat-message-role">AI</span>
-						<div className="ai-chat-markdown-body">
-							<DotBounce />
-						</div>
-					</div>
-				)}
+					);
+				})}
 				<div ref={bottomRef} />
 			</div>
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Transcript server for Obsidian AI Agent.
+Transcript server for Vizier (Obsidian plugin).
 
 Install: pip install youtube-transcript-api
 Run:     python3 transcript_server.py

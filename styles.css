@@ -1,5 +1,5 @@
 /*
-AI Agent Chat View styles
+Vizier Chat View styles
 */
 
 /* ── Animations ─────────────────────────────────────── */
@@ -21,11 +21,20 @@ AI Agent Chat View styles
 
 /* ── Layout ─────────────────────────────────────────── */
 
+/*
+ * Fill the full leaf height.
+ * Obsidian wraps view content in .view-content which already has height:100%.
+ * We use min-height:0 on the flex container so that children can shrink
+ * below their intrinsic size — this is the key fix for the "disappearing
+ * bubbles on resize" bug caused by flex overflow.
+ */
 .ai-chat-container {
 	display: flex;
 	flex-direction: column;
 	height: 100%;
+	min-height: 0;
 	font-size: 14px;
+	overflow: hidden;
 }
 
 .ai-chat-header {
@@ -35,16 +44,28 @@ AI Agent Chat View styles
 	padding: 8px 12px;
 	border-bottom: 1px solid var(--background-modifier-border);
 	flex-shrink: 0;
+	/* Prevent header from being hidden when the panel is very narrow */
+	min-width: 0;
+	flex-wrap: wrap;
+	row-gap: 4px;
 }
 
 .ai-chat-title {
 	font-weight: 600;
 	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .ai-chat-vault {
 	font-size: 11px;
 	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100px;
 }
 
 .ai-chat-model-input {
@@ -55,11 +76,19 @@ AI Agent Chat View styles
 	background: var(--background-secondary);
 	color: var(--text-normal);
 	width: 100px;
+	min-width: 60px;
 }
 
+/*
+ * Messages area must grow to fill available space but must also be able to
+ * shrink. Without min-height:0 the flex child ignores overflow:auto and
+ * bubbles "push" the input area off screen when the panel is resized small.
+ */
 .ai-chat-messages {
-	flex: 1;
+	flex: 1 1 0;
+	min-height: 0;
 	overflow-y: auto;
+	overflow-x: hidden;
 	padding: 12px;
 	display: flex;
 	flex-direction: column;
@@ -79,8 +108,11 @@ AI Agent Chat View styles
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
-	max-width: 90%;
+	/* Constrain width so bubbles don't touch both edges on wide panels */
+	max-width: min(90%, 680px);
 	animation: messageIn 0.18s ease-out;
+	/* Prevent animation from briefly making bubbles wider than the panel */
+	min-width: 0;
 }
 
 .ai-chat-message--user {
@@ -108,6 +140,7 @@ AI Agent Chat View styles
 	line-height: 1.5;
 	white-space: pre-wrap;
 	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .ai-chat-message--user .ai-chat-message-content {
@@ -141,7 +174,10 @@ AI Agent Chat View styles
 	flex-direction: column;
 	gap: 3px;
 	align-items: flex-start;
+	/* Must be able to shrink with the container */
+	min-width: 0;
 	width: 100%;
+	max-width: 100%;
 }
 
 /* ── Rendered markdown ──────────────────────────────── */
@@ -154,7 +190,10 @@ AI Agent Chat View styles
 	color: var(--text-normal);
 	line-height: 1.5;
 	word-break: break-word;
+	overflow-wrap: anywhere;
+	/* Fill width but never overflow the panel */
 	width: 100%;
+	max-width: 100%;
 	box-sizing: border-box;
 	min-height: 36px;
 }
@@ -170,6 +209,15 @@ AI Agent Chat View styles
 .ai-chat-markdown-body pre {
 	max-width: 100%;
 	overflow-x: auto;
+}
+
+/* Wraps MarkdownMessage + optional DotBounce inline within one bubble */
+.ai-chat-markdown-body-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	width: 100%;
+	max-width: 100%;
 }
 
 /* ── Streaming cursor ───────────────────────────────── */
@@ -293,6 +341,7 @@ AI Agent Chat View styles
 
 .ai-chat-textarea {
 	flex: 1;
+	min-width: 0;
 	resize: none;
 	border-radius: 6px;
 	border: 1px solid var(--background-modifier-border);
@@ -346,6 +395,7 @@ AI Agent Chat View styles
 	background: var(--background-secondary);
 	color: var(--text-normal);
 	width: 100%;
+	max-width: 100%;
 	box-sizing: border-box;
 }
 
@@ -375,6 +425,7 @@ AI Agent Chat View styles
 	cursor: pointer;
 	text-align: left;
 	transition: border-color 0.12s, background 0.12s;
+	box-sizing: border-box;
 }
 
 .ai-chat-find-candidate:hover {

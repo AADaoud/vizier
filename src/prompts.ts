@@ -20,13 +20,23 @@ export const Prompts = {
 		`and 2-5 relevant tags. Tags must be lowercase hyphenated-phrases only — no spaces, no special characters.\n\nSummary:\n${summary.slice(0, 1000)}`,
 
 	summarizeChunk: (sourceLabel: string, chunk: string) =>
-		`Summarize this section of a ${sourceLabel} in 2-3 sentences:\n\n${chunk}`,
+		`Summarize this section of a ${sourceLabel} in 2-3 sentences. Output only the summary.\n\n${chunk}`,
 
 	summarizeCombine: (sourceLabel: string, combined: string) =>
-		`The following are section summaries of a ${sourceLabel}. Combine them into one cohesive summary covering the main points:\n\n${combined}`,
+		`The following are section summaries of a ${sourceLabel}. Combine them into one cohesive summary covering the main points. Output only the summary.\n\n${combined}`,
 
 	summarizeFull: (sourceLabel: string, text: string) =>
-		`Summarize the following ${sourceLabel}. Provide a concise summary covering the main points.\n\nContent:\n${text}`,
+		`Summarize the following ${sourceLabel}. Output only the summary covering the main points.\n\nContent:\n${text}`,
+
+	// ── Detailed (lecture/class) summarization ─────────────────────────────
+	summarizeChunkDetailed: (sourceLabel: string, chunk: string) =>
+		`Write detailed notes on this section of a ${sourceLabel}. Capture key concepts, definitions, examples, formulas, and any detail worth remembering. Output only the notes.\n\n${chunk}`,
+
+	summarizeCombineDetailed: (sourceLabel: string, combined: string) =>
+		`The following are detailed section notes from a ${sourceLabel}. Compile them into well-structured notes using markdown headings (##) and bullet points. Preserve all important details. Output only the compiled notes.\n\n${combined}`,
+
+	summarizeFullDetailed: (sourceLabel: string, text: string) =>
+		`Write comprehensive notes on the following ${sourceLabel}. Use markdown headings (##), bullet points, and examples. Cover all key concepts in sufficient detail for later recall. Output only the notes.\n\nContent:\n${text}`,
 
 	readSummarize: (basename: string, content: string) =>
 		`Summarize the following note titled "${basename}". Cover the main points concisely.\n\nContent:\n${content}`,
