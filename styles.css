@@ -484,6 +484,8 @@ Vizier Chat View styles
 	flex-direction: column;
 	gap: 2px;
 	min-width: 0;
+	width: 100%;
+	overflow: hidden;
 }
 
 .ai-chat-find-candidate-title {
@@ -497,6 +499,8 @@ Vizier Chat View styles
 	font-size: 11px;
 	color: var(--text-muted);
 	line-height: 1.4;
+	word-break: break-word;
+	overflow-wrap: anywhere;
 }
 
 .ai-chat-find-candidate-terms {

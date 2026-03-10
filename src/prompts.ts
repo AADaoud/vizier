@@ -28,12 +28,17 @@ export const Prompts = {
 		`- body: thorough markdown with ## headings and paragraphs\n` +
 		`- Output only the requested fields, nothing else`,
 
-	// ── Vault search: keyword extraction ───────────────────────────────────
+	// ── Vault search: keyword expansion ────────────────────────────────────
 	findQueryTerms: (query: string) =>
-		`You are a keyword extraction system.\n\n` +
-		`Given this vault search query: "${query}"\n\n` +
-		`Extract 3-6 short search keywords that would match relevant notes.\n` +
-		`Each term: 1-3 words, lowercase, no punctuation.`,
+		`You are a search term expansion system.\n\n` +
+		`Given this search query: "${query}"\n\n` +
+		`Generate up to 4 alternative phrasings, abbreviations, or synonyms that this topic would literally appear as in a note title or body.\n` +
+		`Rules:\n` +
+		`- Each term: 1-3 words, lowercase, no punctuation\n` +
+		`- Only include terms that would literally appear as text in a note\n` +
+		`- Do NOT include broad categories or related topics — only direct rephrasings\n` +
+		`- Example: "risc vs cisc technology" → ["reduced instruction set", "complex instruction set", "instruction set architecture", "isa"]\n` +
+		`- Example: "notes on eschatology" → ["end times", "last days", "second coming", "apocalypse"]`,
 
 	// ── Vault search: rank results ─────────────────────────────────────────
 	findRankResults: (query: string, context: string) =>

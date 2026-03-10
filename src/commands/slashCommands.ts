@@ -247,29 +247,12 @@ const FIND_TERMS_SCHEMA = {
 	required: ['terms'],
 };
 
-interface FindResult {
-	summary: string;
-	matches: Array<{ title: string; relevance: string }>;
-}
+const STOP_WORDS = new Set(['a', 'an', 'the', 'is', 'on', 'in', 'of', 'for', 'to', 'and', 'or', 'vs', 'about', 'with', 'from', 'by', 'at', 'as', 'i', 'my', 'me', 'we', 'it', 'that', 'this']);
 
-const FIND_SCHEMA = {
-	type: 'object',
-	properties: {
-		summary: { type: 'string' },
-		matches: {
-			type: 'array',
-			items: {
-				type: 'object',
-				properties: {
-					title: { type: 'string' },
-					relevance: { type: 'string' },
-				},
-				required: ['title', 'relevance'],
-			},
-		},
-	},
-	required: ['summary', 'matches'],
-};
+function queryToTerms(query: string): string[] {
+	const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+	return words.length > 0 ? words : [query.toLowerCase()];
+}
 
 export async function executeFind(
 	args: string,
@@ -281,14 +264,15 @@ export async function executeFind(
 ): Promise<void> {
 	const query = args.trim();
 	if (!query) {
-		addMessage('assistant', 'Usage: `/find <natural language query>`\n\nExample: `/find notes about machine learning and neural networks`');
+		addMessage('assistant', 'Usage: `/find <query>`\n\nExample: `/find machine learning neural networks`');
 		return;
 	}
 
-	addMessage('assistant', 'Generating search terms…');
+	// Direct terms from query words (always included)
+	const directTerms = queryToTerms(query);
 
-	// Step 1: use AI to generate search terms from natural language
-	let terms: string[] = [];
+	// AI expands with alternative phrasings/abbreviations that would literally appear in notes
+	let aiTerms: string[] = [];
 	try {
 		const result = await callOllamaStructured<FindTermsResult>({
 			ollamaUrl: config.ollamaUrl,
@@ -296,19 +280,17 @@ export async function executeFind(
 			messages: [{ role: 'user', content: Prompts.findQueryTerms(query) }],
 			format: FIND_TERMS_SCHEMA,
 		});
-		terms = result.terms.filter(t => t.trim().length > 0).slice(0, 6);
-	} catch {
-		// fall back to the raw query as a single term
-		terms = [query];
-	}
+		aiTerms = result.terms.filter(t => t.trim().length > 0).slice(0, 4);
+	} catch { /* use only direct terms */ }
 
-	if (terms.length === 0) terms = [query];
+	// Merge: direct terms first, then unique AI terms
+	const allTerms = [...new Set([...directTerms, ...aiTerms.map(t => t.toLowerCase())])];
 
-	// Step 2: search vault with all terms
+	// Search vault: match terms against note titles first, then content
 	const files = app.vault.getMarkdownFiles();
 	const matchMap = new Map<string, Set<string>>(); // title → matched terms
 
-	for (const term of terms) {
+	for (const term of allTerms) {
 		const lower = term.toLowerCase();
 		for (const file of files) {
 			if (file.basename.toLowerCase().includes(lower)) {
@@ -329,32 +311,16 @@ export async function executeFind(
 	}
 
 	if (matchMap.size === 0) {
-		addMessage('assistant', `No notes found for **"${query}"**.\n\nSearch terms tried: ${terms.map(t => `\`${t}\``).join(', ')}`);
+		addMessage('assistant', `No notes found for **"${query}"**.`);
 		return;
 	}
 
-	// Step 3: get relevance blurbs from AI
-	const titleList = [...matchMap.keys()].slice(0, 20);
-	const context = titleList.map(t => `- ${t}`).join('\n');
-
-	let rankedMatches: Array<{ title: string; relevance: string }> = titleList.map(t => ({ title: t, relevance: '' }));
-	try {
-		const ranked = await callOllamaStructured<FindResult>({
-			ollamaUrl: config.ollamaUrl,
-			model,
-			messages: [{ role: 'user', content: Prompts.findRankResults(query, context) }],
-			format: FIND_SCHEMA,
-		});
-		rankedMatches = ranked.matches;
-	} catch { /* use blank relevance */ }
-
-	const candidates: FindCandidate[] = rankedMatches.map(m => ({
-		title: m.title,
-		relevance: m.relevance,
-		terms: [...(matchMap.get(m.title) ?? new Set())],
+	const candidates: FindCandidate[] = [...matchMap.entries()].slice(0, 20).map(([title, termSet]) => ({
+		title,
+		relevance: '',
+		terms: [...termSet],
 	}));
 
-	// Replace the "Generating search terms…" message with the interactive results
 	addFindResults(query, candidates);
 }
 
