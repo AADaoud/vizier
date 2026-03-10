@@ -1,6 +1,7 @@
 import { App, Modal, Notice, FileSystemAdapter, requestUrl } from 'obsidian';
 import { type ChildProcess, spawn, type SpawnOptions } from 'child_process';
 import * as path from 'path';
+import { logger } from '../utils/logger';
 
 function spawnProc(cmd: string, args: string[], opts?: SpawnOptions): ChildProcess {
 	return spawn(cmd, args, opts ?? {});
@@ -52,7 +53,7 @@ export class TranscriptServerManager {
 			});
 
 			this.process.stderr?.on('data', (data: { toString(): string }) => {
-				console.error('[Vizier] transcript_server stderr:', data.toString());
+				logger.error('transcript_server stderr:', data.toString());
 			});
 
 			this.process.on('error', (err) => {

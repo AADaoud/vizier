@@ -18,7 +18,18 @@ export const MarkdownMessage = ({ content, sourcePath = '' }: MarkdownMessagePro
 		const component = new Component();
 		component.load();
 		void MarkdownRenderer.render(app, content, el, sourcePath, component);
+
+		const handleClick = (e: MouseEvent) => {
+			const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-href]');
+			if (!link) return;
+			e.preventDefault();
+			const href = link.getAttribute('data-href');
+			if (href) app.workspace.openLinkText(href, '', false);
+		};
+		el.addEventListener('click', handleClick);
+
 		return () => {
+			el.removeEventListener('click', handleClick);
 			component.unload();
 		};
 	}, [app, content, sourcePath]);

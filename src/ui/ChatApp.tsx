@@ -224,12 +224,16 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
+			const isConnErr = /failed to fetch|econnrefused|networkerror|network error/i.test(msg);
+			const display = isConnErr
+				? 'Cannot reach Ollama. Make sure it is running:\n```\nollama serve\n```'
+				: `Error: ${msg}`;
 			setMessages(prev => {
 				const last = prev[prev.length - 1];
 				if (last?.role === 'assistant' && last.content === '') {
-					return [...prev.slice(0, -1), { role: 'assistant', content: `Error: ${msg}` }];
+					return [...prev.slice(0, -1), { role: 'assistant', content: display }];
 				}
-				return [...prev, { role: 'assistant', content: `Error: ${msg}` }];
+				return [...prev, { role: 'assistant', content: display }];
 			});
 		} finally {
 			setStreaming(false);

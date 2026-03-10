@@ -22,6 +22,9 @@ export async function callOllama(req: OllamaRequest): Promise<string> {
 		throw: false,
 	});
 
+	if (response.status === 0) {
+		throw new Error('Cannot reach Ollama. Make sure it is running:\n```\nollama serve\n```');
+	}
 	if (response.status >= 400) {
 		throw new Error(`Ollama request failed: HTTP ${response.status}`);
 	}

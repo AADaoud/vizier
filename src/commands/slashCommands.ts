@@ -92,6 +92,15 @@ function buildYamlTags(tags: string[]): string {
 }
 
 
+function isLikelyValidUrl(url: string): boolean {
+	try {
+		const { hostname } = new URL(url);
+		const parts = hostname.split('.');
+		const tld = parts[parts.length - 1] ?? '';
+		return parts.length >= 2 && tld.length >= 2;
+	} catch { return false; }
+}
+
 function extractYouTubeId(url: string): string | null {
 	try {
 		const parsed = new URL(url);
@@ -109,6 +118,9 @@ async function fetchAndSummarizeYouTube(url: string, model: string, config: Comm
 		url: `${config.transcriptServerUrl}/transcript?video_id=${encodeURIComponent(videoId)}`,
 		throw: false,
 	});
+	if (response.status === 0) {
+		throw new Error('TRANSCRIPT_SERVER_UNREACHABLE');
+	}
 	const data = response.json as { transcript?: string; error?: string };
 	if (response.status >= 400) {
 		throw new Error(data.error ?? `Transcript server returned HTTP ${response.status}.`);
@@ -133,10 +145,12 @@ async function fetchAndSummarizeArticle(url: string, model: string, ollamaUrl: s
 		},
 		throw: false,
 	});
+	if (response.status === 429) throw new Error('Jina rate limit reached (20 requests/minute). Wait a moment and try again.');
 	if (response.status >= 400) throw new Error(`Could not retrieve article (HTTP ${response.status}). The page may be blocked or unavailable.`);
 	const text = response.text.trim();
-	if (text.length < 100) {
-		throw new Error('Could not extract readable text from that URL. The page may require authentication or is not publicly accessible.');
+	const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+	if (text.length < 500 || wordCount < 50) {
+		throw new Error('Could not extract readable content from that URL. The page may be a redirect, require authentication, or have no readable text.');
 	}
 	return mapReduceSummarize(text, model, 'article', ollamaUrl, detailed);
 }
@@ -354,7 +368,7 @@ export async function executeSummarize(
 	config: CommandConfig
 ): Promise<void> {
 	const url = args.trim();
-	if (!url || !/^https?:\/\//.test(url)) {
+	if (!url || !/^https?:\/\//.test(url) || !isLikelyValidUrl(url)) {
 		addMessage('assistant', 'Usage: `/summarize <url>` — provide a YouTube or article URL.\n\nExample: `/summarize https://example.com/article`');
 		return;
 	}
@@ -374,7 +388,7 @@ export async function executeSummarize(
 		replaceMessage('assistant', summary);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		if (isYouTube && (msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('Failed to fetch'))) {
+		if (isYouTube && msg.includes('TRANSCRIPT_SERVER_UNREACHABLE')) {
 			replaceMessage(
 				'assistant',
 				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
@@ -412,7 +426,7 @@ export async function executeClip(
 ): Promise<void> {
 	const detailed = args.startsWith('long ');
 	const url = (detailed ? args.slice(5) : args).trim();
-	if (!url || !/^https?:\/\//.test(url)) {
+	if (!url || !/^https?:\/\//.test(url) || !isLikelyValidUrl(url)) {
 		addMessage('assistant', 'Usage: `/clip <url>` or `/clip long <url>` — fetches, summarizes, and saves to your Clips folder.\n\nUse `/clip long` for detailed lecture or class notes.');
 		return;
 	}
@@ -432,7 +446,7 @@ export async function executeClip(
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		if (isYouTube && (msg.includes('fetch') || msg.includes('ECONNREFUSED') || msg.includes('Failed to fetch'))) {
+		if (isYouTube && msg.includes('TRANSCRIPT_SERVER_UNREACHABLE')) {
 			replaceMessage(
 				'assistant',
 				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
