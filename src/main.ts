@@ -23,9 +23,8 @@ class PromptModal extends Modal {
 		const { contentEl } = this;
 		contentEl.createEl('h3', { text: this.title });
 
-		const input = contentEl.createEl('input', { type: 'text' });
+		const input = contentEl.createEl('input', { type: 'text', cls: 'ai-prompt-modal-input' });
 		input.placeholder = this.placeholder;
-		input.style.cssText = 'width:100%;margin-bottom:10px;padding:6px 8px;border-radius:4px;border:1px solid var(--background-modifier-border);background:var(--background-primary);color:var(--text-normal);font-size:14px;';
 
 		const submit = () => {
 			const val = input.value.trim();
@@ -38,8 +37,7 @@ class PromptModal extends Modal {
 			if (e.key === 'Escape') { this.resolve(null); this.close(); }
 		});
 
-		const btnRow = contentEl.createDiv();
-		btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+		const btnRow = contentEl.createDiv({ cls: 'ai-prompt-modal-buttons' });
 		const ok = btnRow.createEl('button', { text: 'OK', cls: 'mod-cta' });
 		ok.onclick = submit;
 		const cancel = btnRow.createEl('button', { text: 'Cancel' });
@@ -70,7 +68,7 @@ function noticeCallbacks(): { addMessage: AddMessage; replaceMessage: AddMessage
 
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
-export default class MyPlugin extends Plugin {
+export default class VizierPlugin extends Plugin {
 	settings: AIAgentSettings;
 	serverManager: TranscriptServerManager;
 
@@ -94,7 +92,7 @@ export default class MyPlugin extends Plugin {
 		// ── Built-in: open chat ────────────────────────────────────────
 		this.addCommand({
 			id: 'open-ai-agent-chat',
-			name: 'Vizier chat',
+			name: 'Chat',
 			callback: () => { void this.activateChatView(); },
 		});
 
@@ -239,7 +237,6 @@ export default class MyPlugin extends Plugin {
 
 	onunload() {
 		this.serverManager.stopServer();
-		this.app.workspace.detachLeavesOfType(VIEW_TYPE_AI_CHAT);
 	}
 
 	async activateChatView(initialCommand?: string) {
@@ -248,7 +245,7 @@ export default class MyPlugin extends Plugin {
 		const leaves = workspace.getLeavesOfType(VIEW_TYPE_AI_CHAT);
 		const existing = leaves[0];
 		if (existing) {
-			workspace.revealLeaf(existing);
+			void workspace.revealLeaf(existing);
 			if (initialCommand) {
 				(existing.view as ChatView).injectCommand(initialCommand);
 			}
@@ -262,7 +259,7 @@ export default class MyPlugin extends Plugin {
 		const leaf = workspace.getRightLeaf(false);
 		if (!leaf) return;
 		await leaf.setViewState({ type: VIEW_TYPE_AI_CHAT, active: true });
-		workspace.revealLeaf(leaf);
+		void workspace.revealLeaf(leaf);
 	}
 
 	async loadSettings() {

@@ -1,4 +1,4 @@
-import { App, TFile } from 'obsidian';
+import { App, TFile, requestUrl } from 'obsidian';
 import { callOllama, callOllamaStructured } from '../utils/ollama';
 import { mapReduceSummarize } from '../utils/chunking';
 import { Prompts } from '../prompts';
@@ -105,9 +105,12 @@ async function fetchAndSummarizeYouTube(url: string, model: string, config: Comm
 	const videoId = extractYouTubeId(url);
 	if (!videoId) throw new Error('Could not parse a YouTube video ID from that URL.');
 
-	const response = await fetch(`${config.transcriptServerUrl}/transcript?video_id=${encodeURIComponent(videoId)}`);
-	const data = await response.json() as { transcript?: string; error?: string };
-	if (!response.ok) {
+	const response = await requestUrl({
+		url: `${config.transcriptServerUrl}/transcript?video_id=${encodeURIComponent(videoId)}`,
+		throw: false,
+	});
+	const data = response.json as { transcript?: string; error?: string };
+	if (response.status >= 400) {
 		throw new Error(data.error ?? `Transcript server returned HTTP ${response.status}.`);
 	}
 	if (!data.transcript || data.transcript.trim().length < 100) {
@@ -122,14 +125,16 @@ async function fetchAndSummarizeArticle(url: string, model: string, ollamaUrl: s
 	// This handles JavaScript-rendered content, paywalls, and encoding issues far
 	// better than fetching raw HTML. No API key required.
 	const jinaUrl = `https://r.jina.ai/${url}`;
-	const response = await fetch(jinaUrl, {
+	const response = await requestUrl({
+		url: jinaUrl,
 		headers: {
 			'Accept': 'text/plain',
 			'X-Return-Format': 'markdown',
 		},
+		throw: false,
 	});
-	if (!response.ok) throw new Error(`Could not retrieve article (HTTP ${response.status}). The page may be blocked or unavailable.`);
-	const text = (await response.text()).trim();
+	if (response.status >= 400) throw new Error(`Could not retrieve article (HTTP ${response.status}). The page may be blocked or unavailable.`);
+	const text = response.text.trim();
 	if (text.length < 100) {
 		throw new Error('Could not extract readable text from that URL. The page may require authentication or is not publicly accessible.');
 	}

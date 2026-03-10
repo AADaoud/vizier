@@ -1,4 +1,4 @@
-import { App, Modal, Notice, FileSystemAdapter } from 'obsidian';
+import { App, Modal, Notice, FileSystemAdapter, requestUrl } from 'obsidian';
 import { type ChildProcess, spawn, type SpawnOptions } from 'child_process';
 import * as path from 'path';
 
@@ -26,8 +26,9 @@ export class TranscriptServerManager {
 	/** Check if the server is reachable at the given URL. */
 	async isServerReachable(transcriptServerUrl: string): Promise<boolean> {
 		try {
-			const res = await fetch(`${transcriptServerUrl}/transcript?video_id=test`, {
-				signal: AbortSignal.timeout(1500),
+			const res = await requestUrl({
+				url: `${transcriptServerUrl}/transcript?video_id=test`,
+				throw: false,
 			});
 			// Any response (even 500) means the server is up
 			return res.status > 0;
@@ -45,12 +46,12 @@ export class TranscriptServerManager {
 				cwd: this.pluginDir,
 			});
 
-			this.process.stdout?.on('data', (data: Buffer) => {
+			this.process.stdout?.on('data', (data: { toString(): string }) => {
 				const line = data.toString();
 				if (line.includes('running on')) resolve();
 			});
 
-			this.process.stderr?.on('data', (data: Buffer) => {
+			this.process.stderr?.on('data', (data: { toString(): string }) => {
 				console.error('[Vizier] transcript_server stderr:', data.toString());
 			});
 
@@ -97,11 +98,11 @@ export class ServerSetupModal extends Modal {
 		const { contentEl } = this;
 		contentEl.createEl('h2', { text: 'YouTube transcript server' });
 		contentEl.createEl('p', {
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			text: 'A small local Python server is required to fetch YouTube transcripts. Click "Setup & start" to automatically create a virtual environment, install dependencies, and launch the server.',
 		});
 
-		const pre = contentEl.createEl('pre');
-		pre.style.cssText = 'background:var(--background-secondary);padding:8px 12px;border-radius:6px;font-size:12px;overflow:auto;max-height:180px;';
+		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
 		pre.textContent = '';
 
 		const log = (msg: string) => {
@@ -214,8 +215,8 @@ export class ServerSetupModal extends Modal {
 	private runCmd(cmd: string, args: string[], cwd: string, log: (m: string) => void): Promise<boolean> {
 		return new Promise((resolve) => {
 			const proc = spawnProc(cmd, args, { cwd });
-			proc.stdout?.on('data', (d: Buffer) => log(d.toString().trimEnd()));
-			proc.stderr?.on('data', (d: Buffer) => log(d.toString().trimEnd()));
+			proc.stdout?.on('data', (d: { toString(): string }) => log(d.toString().trimEnd()));
+			proc.stderr?.on('data', (d: { toString(): string }) => log(d.toString().trimEnd()));
 			proc.on('close', (code: number) => {
 				if (code !== 0) log(`Command failed (exit ${String(code)}).`);
 				resolve(code === 0);

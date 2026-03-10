@@ -1,3 +1,5 @@
+import { requestUrl } from 'obsidian';
+
 interface OllamaMessage {
 	role: string;
 	content: string;
@@ -12,17 +14,19 @@ export interface OllamaRequest {
 
 export async function callOllama(req: OllamaRequest): Promise<string> {
 	const { ollamaUrl, ...body } = req;
-	const response = await fetch(`${ollamaUrl}/api/chat`, {
+	const response = await requestUrl({
+		url: `${ollamaUrl}/api/chat`,
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ...body, stream: false }),
+		throw: false,
 	});
 
-	if (!response.ok) {
+	if (response.status >= 400) {
 		throw new Error(`Ollama request failed: HTTP ${response.status}`);
 	}
 
-	const data = await response.json() as { message?: { content?: string } };
+	const data = response.json as { message?: { content?: string } };
 	return data.message?.content ?? '';
 }
 

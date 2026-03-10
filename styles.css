@@ -2,6 +2,36 @@
 Vizier Chat View styles
 */
 
+/* ── Prompt modal ───────────────────────────────────── */
+
+.ai-prompt-modal-input {
+	width: 100%;
+	margin-bottom: 10px;
+	padding: 6px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 14px;
+}
+
+.ai-prompt-modal-buttons {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+}
+
+/* ── Server setup log ───────────────────────────────── */
+
+.vizier-setup-log {
+	background: var(--background-secondary);
+	padding: 8px 12px;
+	border-radius: 6px;
+	font-size: 12px;
+	overflow: auto;
+	max-height: 180px;
+}
+
 /* ── Animations ─────────────────────────────────────── */
 
 @keyframes messageIn {

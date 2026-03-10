@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type SyntheticEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useApp } from '../context';
+import type { App } from 'obsidian';
 import { AIAgentSettings } from '../settings';
 import { MarkdownMessage } from './MarkdownMessage';
 import { FindResultsMessage } from './FindResultsMessage';
@@ -43,9 +44,9 @@ function parseCommand(input: string): { id: string; args: string } | null {
 	return { id: input.slice(1, space), args: input.slice(space + 1) };
 }
 
-function loadHistory(): Message[] {
+function loadHistory(app: App): Message[] {
 	try {
-		const raw = localStorage.getItem(HISTORY_KEY);
+		const raw = app.loadLocalStorage(HISTORY_KEY) as string | null;
 		if (!raw) return [];
 		return JSON.parse(raw) as Message[];
 	} catch {
@@ -53,10 +54,10 @@ function loadHistory(): Message[] {
 	}
 }
 
-function saveHistory(messages: Message[]): void {
+function saveHistory(app: App, messages: Message[]): void {
 	try {
 		const trimmed = messages.slice(-MAX_HISTORY);
-		localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+		app.saveLocalStorage(HISTORY_KEY, JSON.stringify(trimmed));
 	} catch { /* storage full or unavailable */ }
 }
 
@@ -88,7 +89,7 @@ const DotBounce = () => (
 
 export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: ChatAppProps) => {
 	const app = useApp();
-	const [messages, setMessages] = useState<Message[]>(() => loadHistory());
+	const [messages, setMessages] = useState<Message[]>(() => loadHistory(app));
 	const [input, setInput] = useState('');
 	const [commandLoading, setCommandLoading] = useState(false);
 	const [streaming, setStreaming] = useState(false);
@@ -101,7 +102,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 
 	// Persist history whenever messages change
 	useEffect(() => {
-		saveHistory(messages);
+		saveHistory(app, messages);
 	}, [messages]);
 
 	// Scroll to bottom on new messages
@@ -160,14 +161,14 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 
 	const clearChat = useCallback(() => {
 		setMessages([]);
-		localStorage.removeItem(HISTORY_KEY);
+		app.saveLocalStorage(HISTORY_KEY, null);
 	}, []);
 
 	// Auto-resize textarea
-	const handleTextareaInput = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+	const handleTextareaInput = (e: SyntheticEvent<HTMLTextAreaElement>) => {
 		const el = e.currentTarget;
-		el.style.height = 'auto';
-		el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+		el.setCssStyles({ height: 'auto' });
+		el.setCssStyles({ height: `${Math.min(el.scrollHeight, 120)}px` });
 	};
 
 	// Streaming chat — only for freeform messages
@@ -180,7 +181,8 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		]);
 
 		try {
-			const response = await fetch(`${settings.ollamaUrl}/api/chat`, {
+			// eslint-disable-next-line no-restricted-globals
+		const response = await fetch(`${settings.ollamaUrl}/api/chat`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -239,7 +241,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		if (!text || isLoading) return;
 		setInput('');
 		if (textareaRef.current) {
-			textareaRef.current.style.height = 'auto';
+			textareaRef.current.setCssStyles({ height: 'auto' });
 		}
 
 		const parsed = parseCommand(text);
@@ -314,7 +316,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		textareaRef.current?.focus();
 	};
 
-	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+	const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
 		if (showPicker) {
 			if (e.key === 'ArrowDown') {
 				e.preventDefault();

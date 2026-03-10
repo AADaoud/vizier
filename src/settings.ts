@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
-import MyPlugin from './main';
+import VizierPlugin from './main';
 
 export interface AIAgentSettings {
 	ollamaUrl: string;
@@ -18,9 +18,9 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+	plugin: VizierPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: VizierPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -31,8 +31,10 @@ export class AIAgentSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Ollama URL')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Base URL of your Ollama instance.')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('http://localhost:11434')
 				.setValue(this.plugin.settings.ollamaUrl)
 				.onChange(async (value) => {
@@ -42,8 +44,10 @@ export class AIAgentSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Default model')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Ollama model name used by default (e.g. gemma3:4b, llama3.2).')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('gemma3:4b')
 				.setValue(this.plugin.settings.defaultModel)
 				.onChange(async (value) => {

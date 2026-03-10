@@ -4,7 +4,7 @@ import { Root, createRoot } from 'react-dom/client';
 import { ChatApp } from './ChatApp';
 import { AppContext } from '../context';
 import { AIAgentSettings } from '../settings';
-import type MyPlugin from '../main';
+import type VizierPlugin from '../main';
 
 export const VIEW_TYPE_AI_CHAT = 'vizier-chat-view';
 
@@ -15,7 +15,7 @@ export class ChatView extends ItemView {
 	constructor(
 		leaf: WorkspaceLeaf,
 		private pluginSettings: AIAgentSettings,
-		private plugin: MyPlugin
+		private plugin: VizierPlugin
 	) {
 		super(leaf);
 	}
