@@ -24,7 +24,7 @@ export const MarkdownMessage = ({ content, sourcePath = '' }: MarkdownMessagePro
 			if (!link) return;
 			e.preventDefault();
 			const href = link.getAttribute('data-href');
-			if (href) app.workspace.openLinkText(href, '', false);
+			if (href) void app.workspace.openLinkText(href, '', false);
 		};
 		el.addEventListener('click', handleClick);
 
