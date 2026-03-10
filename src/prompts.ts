@@ -1,46 +1,123 @@
+/**
+ * Prompts optimized for deterministic output from small (4B param) models.
+ * Assumes Ollama structured output mode handles JSON schema enforcement.
+ *
+ * Design principles:
+ * ─────────────────────────────────────────────────────────────────────────
+ * 1. ROLE PRIMING — "You are a [X] system" shifts the model out of
+ *    "helpful assistant" mode into tool-like behavior.
+ *
+ * 2. NEGATIVE CONSTRAINTS — "Do NOT explain/evaluate/praise" suppresses
+ *    the critique-and-suggest reflex baked into small-model fine-tuning.
+ *
+ * 3. COMPLETION-STYLE ENDINGS — Prompts end with "SUMMARY:" or "ANSWER:"
+ *    so the model's first token is content, not meta-commentary.
+ *
+ * 4. CONCISE FRAMING — Short, direct instructions. Small models lose the
+ *    plot with long preambles.
+ */
+
 export const Prompts = {
+	// ── Note creation ──────────────────────────────────────────────────────
 	writeNote: (topic: string) =>
-		`Create a well-structured Obsidian markdown note about: ${topic}\n\n` +
-		`Provide a descriptive filename (no extension, no path separators), ` +
-		`relevant tags as an array of single lowercase words or hyphenated-phrases (no spaces, no special characters), ` +
-		`and detailed content for the body field. The body should use markdown headings and be thorough.`,
+		`You are a note-writing system.\n\n` +
+		`Create an Obsidian markdown note about: ${topic}\n\n` +
+		`Rules:\n` +
+		`- filename: descriptive, no extension, no slashes, kebab-case\n` +
+		`- tags: 3-6 lowercase single words or hyphenated-phrases\n` +
+		`- body: thorough markdown with ## headings and paragraphs\n` +
+		`- Output only the requested fields, nothing else`,
 
+	// ── Vault search: keyword extraction ───────────────────────────────────
 	findQueryTerms: (query: string) =>
-		`Given this natural language vault search query: "${query}"\n\n` +
-		`Generate 3-6 short keyword search terms that would surface relevant notes. ` +
-		`Return only the terms array. Each term should be 1-3 words, lowercase, no punctuation.`,
+		`You are a keyword extraction system.\n\n` +
+		`Given this vault search query: "${query}"\n\n` +
+		`Extract 3-6 short search keywords that would match relevant notes.\n` +
+		`Each term: 1-3 words, lowercase, no punctuation.`,
 
+	// ── Vault search: rank results ─────────────────────────────────────────
 	findRankResults: (query: string, context: string) =>
-		`The user searched their Obsidian vault for: "${query}"\n\n` +
+		`You are a search relevance system.\n\n` +
+		`User query: "${query}"\n\n` +
 		`Matching notes:\n${context}\n\n` +
-		`For each note listed above, provide a short one-sentence relevance note explaining why it matches. Keep overall summary under 2 sentences.`,
+		`For each note, write one sentence explaining why it matches the query.\n` +
+		`Write one overall summary sentence.\n` +
+		`Do NOT evaluate quality. Do NOT suggest improvements.`,
 
+	// ── Clip: metadata extraction ──────────────────────────────────────────
 	clipMetadata: (summary: string) =>
-		`Given this summary of a web page, provide a concise title (max 60 chars, no special characters except hyphens) ` +
-		`and 2-5 relevant tags. Tags must be lowercase hyphenated-phrases only — no spaces, no special characters.\n\nSummary:\n${summary.slice(0, 1000)}`,
+		`You are a metadata extraction system.\n\n` +
+		`Extract a title and tags from this web page summary:\n\n${summary.slice(0, 1000)}\n\n` +
+		`Rules:\n` +
+		`- title: max 60 characters, no special characters except hyphens\n` +
+		`- tags: 2-5 lowercase hyphenated-phrases`,
 
+	// ── Summarization: chunk ───────────────────────────────────────────────
 	summarizeChunk: (sourceLabel: string, chunk: string) =>
-		`Summarize this section of a ${sourceLabel} in 2-3 sentences. Output only the summary.\n\n${chunk}`,
+		`You are a summarization system. Output ONLY the summary.\n\n` +
+		`Summarize this section of a ${sourceLabel} in 2-3 sentences.\n` +
+		`Do NOT evaluate the content. Do NOT comment on quality.\n\n` +
+		`SECTION:\n${chunk}\n\n` +
+		`SUMMARY:`,
 
+	// ── Summarization: combine chunks ──────────────────────────────────────
 	summarizeCombine: (sourceLabel: string, combined: string) =>
-		`The following are section summaries of a ${sourceLabel}. Combine them into one cohesive summary covering the main points. Output only the summary.\n\n${combined}`,
+		`You are a summarization system. Output ONLY the combined summary.\n\n` +
+		`Below are section summaries of a ${sourceLabel}. Combine them into one cohesive paragraph covering all main points.\n\n` +
+		`Do NOT list strengths or weaknesses. Do NOT suggest improvements. Do NOT evaluate. Do NOT praise. Just summarize the factual content.\n\n` +
+		`SECTION SUMMARIES:\n${combined}\n\n` +
+		`COMBINED SUMMARY:`,
 
+	// ── Summarization: full document ───────────────────────────────────────
 	summarizeFull: (sourceLabel: string, text: string) =>
-		`Summarize the following ${sourceLabel}. Output only the summary covering the main points.\n\nContent:\n${text}`,
+		`You are a summarization system. Output ONLY the summary.\n\n` +
+		`Summarize the following ${sourceLabel} in 3-5 sentences covering the main points.\n` +
+		`Do NOT evaluate. Do NOT list strengths. Do NOT suggest improvements. Do NOT praise.\n\n` +
+		`CONTENT:\n${text}\n\n` +
+		`SUMMARY:`,
 
-	// ── Detailed (lecture/class) summarization ─────────────────────────────
+	// ── Detailed (lecture/class) summarization: chunk ───────────────────────
 	summarizeChunkDetailed: (sourceLabel: string, chunk: string) =>
-		`Write detailed notes on this section of a ${sourceLabel}. Capture key concepts, definitions, examples, formulas, and any detail worth remembering. Output only the notes.\n\n${chunk}`,
+		`You are a note-taking system. Output ONLY the notes.\n\n` +
+		`Write detailed notes on this section of a ${sourceLabel}.\n` +
+		`Capture: key concepts, definitions, examples, formulas, important details.\n` +
+		`Use bullet points. Do NOT evaluate or comment on quality.\n\n` +
+		`SECTION:\n${chunk}\n\n` +
+		`NOTES:`,
 
+	// ── Detailed summarization: combine chunks ─────────────────────────────
 	summarizeCombineDetailed: (sourceLabel: string, combined: string) =>
-		`The following are detailed section notes from a ${sourceLabel}. Compile them into well-structured notes using markdown headings (##) and bullet points. Preserve all important details. Output only the compiled notes.\n\n${combined}`,
+		`You are a note-taking system. Output ONLY the compiled notes.\n\n` +
+		`Below are detailed section notes from a ${sourceLabel}. Compile them into well-structured notes.\n` +
+		`Use ## headings and bullet points. Preserve all important details.\n` +
+		`Do NOT add introductions, conclusions, evaluations, or commentary.\n\n` +
+		`SECTION NOTES:\n${combined}\n\n` +
+		`COMPILED NOTES:`,
 
+	// ── Detailed summarization: full document ──────────────────────────────
 	summarizeFullDetailed: (sourceLabel: string, text: string) =>
-		`Write comprehensive notes on the following ${sourceLabel}. Use markdown headings (##), bullet points, and examples. Cover all key concepts in sufficient detail for later recall. Output only the notes.\n\nContent:\n${text}`,
+		`You are a note-taking system. Output ONLY the notes.\n\n` +
+		`Write comprehensive notes on the following ${sourceLabel}.\n` +
+		`Use ## headings, bullet points, and include examples.\n` +
+		`Cover all key concepts in enough detail for later recall.\n` +
+		`Do NOT add introductions, conclusions, evaluations, or commentary.\n\n` +
+		`CONTENT:\n${text}\n\n` +
+		`NOTES:`,
 
+	// ── Read: summarize a note ─────────────────────────────────────────────
 	readSummarize: (basename: string, content: string) =>
-		`Summarize the following note titled "${basename}". Cover the main points concisely.\n\nContent:\n${content}`,
+		`You are a summarization system. Output ONLY the summary.\n\n` +
+		`Summarize the note titled "${basename}" in 2-4 sentences covering the main points.\n` +
+		`Do NOT evaluate or praise the note.\n\n` +
+		`NOTE CONTENT:\n${content}\n\n` +
+		`SUMMARY:`,
 
+	// ── Read: answer a question about a note ───────────────────────────────
 	readQuestion: (question: string, content: string) =>
-		`Using the following note as context, answer this question: ${question}\n\nNote content:\n${content}`,
+		`You are a question-answering system. Output ONLY the answer.\n\n` +
+		`Using the note below as context, answer this question: ${question}\n\n` +
+		`Answer directly. If the answer is not in the note, say "Not found in this note."\n` +
+		`Do NOT summarize the entire note. Do NOT add commentary.\n\n` +
+		`NOTE CONTENT:\n${content}\n\n` +
+		`ANSWER:`,
 };
