@@ -1,3 +1,4 @@
+import { TFile } from 'obsidian';
 import { useApp } from '../context';
 import { FindCandidate } from '../commands/slashCommands';
 
@@ -10,8 +11,10 @@ export const FindResultsMessage = ({ query, candidates }: FindResultsMessageProp
 	const app = useApp();
 
 	const open = (title: string) => {
+		const file = app.metadataCache.getFirstLinkpathDest(title, '') ?? app.vault.getAbstractFileByPath(title + '.md');
+		if (!(file instanceof TFile)) return;
 		const leaf = app.workspace.getLeaf('split');
-		void leaf.openFile(app.metadataCache.getFirstLinkpathDest(title, '') ?? app.vault.getAbstractFileByPath(title + '.md') as any);
+		void leaf.openFile(file);
 	};
 
 	return (

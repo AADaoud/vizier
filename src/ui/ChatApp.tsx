@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type SyntheticEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import React, { useState, useRef, useEffect, useCallback, type SyntheticEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useApp } from '../context';
 import type { App } from 'obsidian';
 import { AIAgentSettings } from '../settings';
@@ -70,7 +70,7 @@ function saveHistory(app: App, messages: Message[]): void {
 	} catch { /* storage full or unavailable */ }
 }
 
-const BishopIcon = ({ className }) => (
+const BishopIcon = ({ className }: React.SVGProps<SVGSVGElement>) => (
   <svg className={className} viewBox="0 0 32 40" fill="none"
     stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
     {/* base */}
