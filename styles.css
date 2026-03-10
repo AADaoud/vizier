@@ -1,18 +1,46 @@
 /*
-Vizier Chat View styles
-*/
+ * Vizier Chat View — Monochrome Minimalist
+ * A local-first, privacy-focused AI agent powered by Ollama.
+ *
+ * Palette: pure black / white / grey — no color accents.
+ */
 
-/* ── Prompt modal ───────────────────────────────────── */
+/* ── Custom properties (scoped to the plugin) ──────── */
+
+.ai-chat-container {
+	--v-black: #0a0a0a;
+	--v-bg: #101010;
+	--v-raised: #181818;
+	--v-surface: #1f1f1f;
+	--v-border: #262626;
+	--v-border-hover: #3a3a3a;
+	--v-white: #e8e8e8;
+	--v-text: #b0b0b0;
+	--v-muted: #6a6a6a;
+	--v-faint: #404040;
+	--v-dim: rgba(255, 255, 255, 0.04);
+	--v-glow: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Prompt modal ──────────────────────────────────── */
 
 .ai-prompt-modal-input {
 	width: 100%;
 	margin-bottom: 10px;
-	padding: 6px 8px;
-	border-radius: 4px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
-	color: var(--text-normal);
-	font-size: 14px;
+	padding: 8px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--v-border);
+	background: var(--v-bg);
+	color: var(--v-white);
+	font-size: 13px;
+	font-family: inherit;
+	transition: border-color 0.2s;
+}
+
+.ai-prompt-modal-input:focus {
+	outline: none;
+	border-color: var(--v-muted);
+	box-shadow: 0 0 0 2px var(--v-dim);
 }
 
 .ai-prompt-modal-buttons {
@@ -21,67 +49,70 @@ Vizier Chat View styles
 	justify-content: flex-end;
 }
 
-/* ── Server setup log ───────────────────────────────── */
+/* ── Server setup log ──────────────────────────────── */
 
 .vizier-setup-log {
-	background: var(--background-secondary);
-	padding: 8px 12px;
-	border-radius: 6px;
-	font-size: 12px;
+	background: var(--v-black);
+	padding: 10px 14px;
+	border-radius: 8px;
+	font-size: 11px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	color: var(--v-muted);
 	overflow: auto;
 	max-height: 180px;
+	border: 1px solid var(--v-border);
 }
 
-/* ── Animations ─────────────────────────────────────── */
+/* ── Animations ────────────────────────────────────── */
 
 @keyframes messageIn {
-	from { opacity: 0; transform: translateY(5px); }
+	from { opacity: 0; transform: translateY(6px); }
 	to   { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes blink {
-	0%, 100% { opacity: 1; }
-	50%       { opacity: 0; }
+@keyframes cursorPulse {
+	0%, 100% { opacity: 0.85; }
+	50%      { opacity: 0.1; }
 }
 
 @keyframes dotBounce {
-	0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-	40%            { transform: translateY(-5px); opacity: 1; }
+	0%, 80%, 100% { transform: translateY(0); opacity: 0.2; }
+	40%           { transform: translateY(-4px); opacity: 0.7; }
 }
 
-/* ── Layout ─────────────────────────────────────────── */
+/* ── Layout ────────────────────────────────────────── */
 
-/*
- * Fill the full leaf height.
- * Obsidian wraps view content in .view-content which already has height:100%.
- * We use min-height:0 on the flex container so that children can shrink
- * below their intrinsic size — this is the key fix for the "disappearing
- * bubbles on resize" bug caused by flex overflow.
- */
 .ai-chat-container {
 	display: flex;
 	flex-direction: column;
 	height: 100%;
 	min-height: 0;
-	font-size: 14px;
+	font-size: 13.5px;
 	overflow: hidden;
+	background: var(--v-bg);
+	color: var(--v-text);
 }
+
+/* ── Header ────────────────────────────────────────── */
 
 .ai-chat-header {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	padding: 8px 12px;
-	border-bottom: 1px solid var(--background-modifier-border);
+	gap: 10px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--v-border);
 	flex-shrink: 0;
-	/* Prevent header from being hidden when the panel is very narrow */
 	min-width: 0;
 	flex-wrap: wrap;
 	row-gap: 4px;
+	background: var(--v-black);
 }
 
 .ai-chat-title {
-	font-weight: 600;
+	font-weight: 500;
+	font-size: 13px;
+	letter-spacing: 0.04em;
+	color: var(--v-white);
 	flex: 1;
 	min-width: 0;
 	white-space: nowrap;
@@ -90,58 +121,85 @@ Vizier Chat View styles
 }
 
 .ai-chat-vault {
-	font-size: 11px;
-	color: var(--text-muted);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--v-faint);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	max-width: 100px;
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: var(--v-dim);
+	border: 1px solid var(--v-border);
 }
 
 .ai-chat-model-input {
 	font-size: 11px;
-	padding: 2px 6px;
-	border-radius: 4px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-secondary);
-	color: var(--text-normal);
-	width: 100px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	padding: 3px 8px;
+	border-radius: 5px;
+	border: 1px solid var(--v-border);
+	background: var(--v-bg);
+	color: var(--v-white);
+	width: 105px;
 	min-width: 60px;
+	transition: border-color 0.2s;
 }
 
-/*
- * Messages area must grow to fill available space but must also be able to
- * shrink. Without min-height:0 the flex child ignores overflow:auto and
- * bubbles "push" the input area off screen when the panel is resized small.
- */
+.ai-chat-model-input:focus {
+	outline: none;
+	border-color: var(--v-muted);
+	box-shadow: 0 0 0 2px var(--v-dim);
+}
+
+/* ── Messages area ─────────────────────────────────── */
+
 .ai-chat-messages {
 	flex: 1 1 0;
 	min-height: 0;
 	overflow-y: auto;
 	overflow-x: hidden;
-	padding: 12px;
+	padding: 16px 14px;
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 14px;
+	scrollbar-width: thin;
+	scrollbar-color: var(--v-border) transparent;
+}
+
+.ai-chat-messages::-webkit-scrollbar {
+	width: 4px;
+}
+
+.ai-chat-messages::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.ai-chat-messages::-webkit-scrollbar-thumb {
+	background: var(--v-faint);
+	border-radius: 4px;
 }
 
 .ai-chat-empty {
-	color: var(--text-muted);
+	color: var(--v-faint);
 	text-align: center;
-	margin-top: 40px;
-	font-style: italic;
+	margin-top: 48px;
+	font-size: 12px;
+	font-weight: 400;
+	letter-spacing: 0.03em;
 }
 
-/* ── Messages ───────────────────────────────────────── */
+/* ── Messages ──────────────────────────────────────── */
 
 .ai-chat-message {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
-	/* Constrain width so bubbles don't touch both edges on wide panels */
-	max-width: min(90%, 680px);
-	animation: messageIn 0.18s ease-out;
-	/* Prevent animation from briefly making bubbles wider than the panel */
+	gap: 3px;
+	max-width: min(88%, 640px);
+	animation: messageIn 0.2s ease-out;
 	min-width: 0;
 }
 
@@ -156,92 +214,120 @@ Vizier Chat View styles
 }
 
 .ai-chat-message-role {
-	font-size: 10px;
+	font-size: 9px;
 	font-weight: 600;
-	color: var(--text-muted);
+	color: var(--v-faint);
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
+	letter-spacing: 0.1em;
+	padding: 0 4px;
 }
 
 .ai-chat-message-content {
 	margin: 0;
-	padding: 8px 12px;
-	border-radius: 10px;
-	line-height: 1.5;
+	padding: 10px 14px;
+	border-radius: 12px;
+	line-height: 1.55;
 	white-space: pre-wrap;
 	word-break: break-word;
 	overflow-wrap: anywhere;
+	font-size: 13px;
 }
 
+/* User bubble — slightly lighter surface */
 .ai-chat-message--user .ai-chat-message-content {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
-	border-bottom-right-radius: 3px;
+	background: var(--v-surface);
+	color: var(--v-white);
+	border-bottom-right-radius: 4px;
+	border: 1px solid var(--v-border);
 }
 
+/* Assistant bubble — raised with a thin white left edge */
 .ai-chat-message--assistant .ai-chat-message-content {
-	background: var(--background-secondary);
-	color: var(--text-normal);
-	border-bottom-left-radius: 3px;
+	background: var(--v-raised);
+	color: var(--v-text);
+	border-bottom-left-radius: 4px;
+	border: 1px solid var(--v-border);
+	border-left: 2px solid var(--v-faint);
 }
+
+/* ── Hint ──────────────────────────────────────────── */
 
 .ai-chat-hint {
-	font-size: 12px;
-	color: var(--text-faint);
+	font-size: 11px;
+	color: var(--v-faint);
 	margin-top: 6px;
 }
 
 .ai-chat-hint code {
-	background: var(--background-secondary);
-	padding: 1px 4px;
+	background: var(--v-raised);
+	padding: 1px 5px;
 	border-radius: 3px;
-	font-size: 11px;
+	font-size: 10px;
+	color: var(--v-muted);
+	border: 1px solid var(--v-border);
 }
 
-/* Message inner wrapper (bubble + copy button) */
+/* ── Message inner wrapper ─────────────────────────── */
+
 .ai-chat-message-inner {
 	display: flex;
 	flex-direction: column;
-	gap: 3px;
+	gap: 4px;
 	align-items: flex-start;
-	/* Must be able to shrink with the container */
 	min-width: 0;
 	width: 100%;
 	max-width: 100%;
 }
 
-/* ── Rendered markdown ──────────────────────────────── */
+/* ── Rendered markdown ─────────────────────────────── */
 
 .ai-chat-markdown-body {
-	padding: 8px 12px;
-	border-radius: 10px;
-	border-bottom-left-radius: 3px;
-	background: var(--background-secondary);
-	color: var(--text-normal);
-	line-height: 1.5;
+	padding: 10px 14px;
+	border-radius: 12px;
+	border-bottom-left-radius: 4px;
+	background: var(--v-raised);
+	color: var(--v-text);
+	line-height: 1.55;
 	word-break: break-word;
 	overflow-wrap: anywhere;
-	/* Fill width but never overflow the panel */
 	width: 100%;
 	max-width: 100%;
 	box-sizing: border-box;
 	min-height: 36px;
+	border: 1px solid var(--v-border);
+	border-left: 2px solid var(--v-faint);
 }
 
-.ai-chat-markdown-body > :first-child {
-	margin-top: 0;
-}
-
-.ai-chat-markdown-body > :last-child {
-	margin-bottom: 0;
-}
+.ai-chat-markdown-body > :first-child { margin-top: 0; }
+.ai-chat-markdown-body > :last-child  { margin-bottom: 0; }
 
 .ai-chat-markdown-body pre {
 	max-width: 100%;
 	overflow-x: auto;
+	background: var(--v-black);
+	border: 1px solid var(--v-border);
+	border-radius: 6px;
+	padding: 10px 12px;
+	font-size: 12px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
 }
 
-/* Wraps MarkdownMessage + optional DotBounce inline within one bubble */
+.ai-chat-markdown-body code {
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	font-size: 12px;
+}
+
+.ai-chat-markdown-body a {
+	color: var(--v-white);
+	text-decoration: none;
+	border-bottom: 1px solid var(--v-faint);
+	transition: border-color 0.15s;
+}
+
+.ai-chat-markdown-body a:hover {
+	border-bottom-color: var(--v-muted);
+}
+
 .ai-chat-markdown-body-wrap {
 	display: flex;
 	flex-direction: column;
@@ -250,122 +336,138 @@ Vizier Chat View styles
 	max-width: 100%;
 }
 
-/* ── Streaming cursor ───────────────────────────────── */
+/* ── Streaming cursor ──────────────────────────────── */
 
 .ai-chat-streaming-cursor {
 	display: inline-block;
 	width: 2px;
 	height: 1em;
 	vertical-align: text-bottom;
-	background: var(--text-muted);
+	background: var(--v-white);
 	margin-left: 2px;
 	border-radius: 1px;
-	animation: blink 0.7s step-end infinite;
+	animation: cursorPulse 0.8s ease-in-out infinite;
 }
 
-/* ── Dot-bounce loader ──────────────────────────────── */
+/* ── Dot-bounce loader ─────────────────────────────── */
 
 .ai-chat-dot-bounce {
 	display: flex;
-	gap: 4px;
+	gap: 5px;
 	align-items: center;
 	padding: 2px 0;
 }
 
 .ai-chat-dot-bounce span {
 	display: inline-block;
-	width: 6px;
-	height: 6px;
+	width: 5px;
+	height: 5px;
 	border-radius: 50%;
-	background: var(--text-muted);
+	background: var(--v-muted);
 	animation: dotBounce 1.2s ease-in-out infinite;
 }
 
-.ai-chat-dot-bounce span:nth-child(2) { animation-delay: 0.2s; }
-.ai-chat-dot-bounce span:nth-child(3) { animation-delay: 0.4s; }
+.ai-chat-dot-bounce span:nth-child(2) { animation-delay: 0.15s; }
+.ai-chat-dot-bounce span:nth-child(3) { animation-delay: 0.3s; }
 
-/* ── Copy button ────────────────────────────────────── */
+/* ── Copy button ───────────────────────────────────── */
 
 .ai-chat-copy-btn {
 	font-size: 10px;
-	padding: 1px 6px;
-	border-radius: 3px;
-	border: 1px solid var(--background-modifier-border);
+	padding: 2px 7px;
+	border-radius: 4px;
+	border: 1px solid var(--v-border);
 	background: transparent;
-	color: var(--text-faint);
+	color: var(--v-faint);
 	cursor: pointer;
 	opacity: 0;
-	transition: opacity 0.15s;
+	transition: opacity 0.2s, color 0.15s, border-color 0.15s;
 }
 
 .ai-chat-message:hover .ai-chat-copy-btn {
 	opacity: 1;
 }
 
-/* ── Clear button ───────────────────────────────────── */
+.ai-chat-copy-btn:hover {
+	color: var(--v-white);
+	border-color: var(--v-muted);
+}
+
+/* ── Clear button ──────────────────────────────────── */
 
 .ai-chat-clear-btn {
-	font-size: 11px;
-	padding: 2px 7px;
-	border-radius: 4px;
-	border: 1px solid var(--background-modifier-border);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.04em;
+	padding: 3px 9px;
+	border-radius: 5px;
+	border: 1px solid var(--v-border);
 	background: transparent;
-	color: var(--text-muted);
+	color: var(--v-faint);
 	cursor: pointer;
 	flex-shrink: 0;
+	transition: color 0.15s, border-color 0.15s;
 }
 
 .ai-chat-clear-btn:hover {
-	background: var(--background-modifier-hover);
-	color: var(--text-normal);
+	border-color: var(--v-muted);
+	color: var(--v-white);
 }
 
-/* ── Input area ─────────────────────────────────────── */
+/* ── Input area ────────────────────────────────────── */
 
 .ai-chat-input-area {
 	flex-shrink: 0;
-	border-top: 1px solid var(--background-modifier-border);
+	border-top: 1px solid var(--v-border);
+	background: var(--v-black);
 	position: relative;
 }
 
 .ai-chat-command-picker {
-	border-bottom: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
+	border-bottom: 1px solid var(--v-border);
+	background: var(--v-bg);
+	padding: 4px 0;
 }
 
 .ai-chat-command-item {
 	display: flex;
 	flex-direction: column;
 	width: 100%;
-	padding: 7px 14px;
+	padding: 8px 14px;
 	text-align: left;
 	background: transparent;
 	border: none;
+	border-left: 2px solid transparent;
 	cursor: pointer;
-	gap: 1px;
+	gap: 2px;
+	transition: background 0.12s, border-color 0.12s;
 }
 
-.ai-chat-command-item--active,
 .ai-chat-command-item:hover {
-	background: var(--background-modifier-hover);
+	background: var(--v-dim);
+}
+
+.ai-chat-command-item--active {
+	background: var(--v-glow);
+	border-left-color: var(--v-white);
 }
 
 .ai-chat-command-label {
 	font-weight: 600;
-	font-size: 13px;
-	color: var(--interactive-accent);
-	font-family: monospace;
+	font-size: 12px;
+	color: var(--v-white);
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
 }
 
 .ai-chat-command-desc {
 	font-size: 11px;
-	color: var(--text-muted);
+	color: var(--v-muted);
 }
 
 .ai-chat-input-row {
 	display: flex;
 	gap: 8px;
-	padding: 10px 12px;
+	padding: 10px 14px;
 	align-items: flex-end;
 }
 
@@ -373,73 +475,88 @@ Vizier Chat View styles
 	flex: 1;
 	min-width: 0;
 	resize: none;
-	border-radius: 6px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
-	color: var(--text-normal);
-	padding: 8px;
+	border-radius: 8px;
+	border: 1px solid var(--v-border);
+	background: var(--v-bg);
+	color: var(--v-white);
+	padding: 9px 11px;
 	font-size: 13px;
 	font-family: inherit;
-	line-height: 1.4;
+	line-height: 1.45;
 	overflow-y: hidden;
-	min-height: 36px;
+	min-height: 38px;
 	max-height: 120px;
+	transition: border-color 0.2s;
+}
+
+.ai-chat-textarea::placeholder {
+	color: var(--v-faint);
 }
 
 .ai-chat-textarea:focus {
 	outline: none;
-	border-color: var(--interactive-accent);
+	border-color: var(--v-muted);
 }
 
 .ai-chat-send-btn {
 	align-self: flex-end;
-	width: 34px;
-	height: 34px;
-	border-radius: 6px;
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
+	width: 36px;
+	height: 36px;
+	border-radius: 8px;
+	background: var(--v-white);
+	color: var(--v-black);
 	border: none;
 	cursor: pointer;
 	font-size: 14px;
+	font-weight: 700;
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	flex-shrink: 0;
+	transition: opacity 0.15s, transform 0.12s;
 }
 
 .ai-chat-send-btn:disabled {
-	opacity: 0.5;
+	opacity: 0.2;
 	cursor: not-allowed;
 }
 
 .ai-chat-send-btn:not(:disabled):hover {
-	background: var(--interactive-accent-hover);
+	opacity: 0.85;
+	transform: translateY(-1px);
 }
 
-/* ── Find results ───────────────────────────────────── */
+.ai-chat-send-btn:not(:disabled):active {
+	transform: translateY(0);
+}
+
+/* ── Find results ──────────────────────────────────── */
 
 .ai-chat-find-results {
-	padding: 10px 12px;
-	border-radius: 10px;
-	border-bottom-left-radius: 3px;
-	background: var(--background-secondary);
-	color: var(--text-normal);
+	padding: 12px 14px;
+	border-radius: 12px;
+	border-bottom-left-radius: 4px;
+	background: var(--v-raised);
+	color: var(--v-text);
 	width: 100%;
 	max-width: 100%;
 	box-sizing: border-box;
+	border: 1px solid var(--v-border);
 }
 
 .ai-chat-find-header {
-	font-size: 13px;
-	margin: 0 0 8px;
-	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	margin: 0 0 10px;
+	color: var(--v-faint);
 }
 
 .ai-chat-find-list {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	margin-bottom: 10px;
+	gap: 6px;
 }
 
 .ai-chat-find-candidate {
@@ -447,36 +564,21 @@ Vizier Chat View styles
 	align-items: flex-start;
 	gap: 8px;
 	width: 100%;
-	padding: 6px 8px;
-	border-radius: 6px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
-	color: var(--text-normal);
+	padding: 9px 11px;
+	margin: 8px auto;
+	border-radius: 8px;
+	border: 1px solid var(--v-border);
+	background: var(--v-bg);
+	color: var(--v-text);
 	cursor: pointer;
 	text-align: left;
-	transition: border-color 0.12s, background 0.12s;
+	transition: border-color 0.15s, background 0.15s;
 	box-sizing: border-box;
 }
 
 .ai-chat-find-candidate:hover {
-	background: var(--background-modifier-hover);
-}
-
-.ai-chat-find-candidate--selected {
-	border-color: var(--interactive-accent);
-	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
-}
-
-.ai-chat-find-candidate-check {
-	font-size: 13px;
-	flex-shrink: 0;
-	color: var(--text-muted);
-	margin-top: 1px;
-	width: 14px;
-}
-
-.ai-chat-find-candidate--selected .ai-chat-find-candidate-check {
-	color: var(--interactive-accent);
+	background: var(--v-dim);
+	border-color: var(--v-border-hover);
 }
 
 .ai-chat-find-candidate-body {
@@ -489,15 +591,15 @@ Vizier Chat View styles
 }
 
 .ai-chat-find-candidate-title {
-	font-size: 13px;
+	font-size: 12.5px;
 	font-weight: 500;
-	color: var(--text-accent);
+	color: var(--v-text);
 	word-break: break-word;
 }
 
 .ai-chat-find-candidate-relevance {
 	font-size: 11px;
-	color: var(--text-muted);
+	color: var(--v-muted);
 	line-height: 1.4;
 	word-break: break-word;
 	overflow-wrap: anywhere;
@@ -506,54 +608,235 @@ Vizier Chat View styles
 .ai-chat-find-candidate-terms {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 3px;
-	margin-top: 2px;
+	gap: 4px;
+	margin-top: 4px;
+	padding-bottom: 2px;
 }
 
 .ai-chat-find-candidate-terms code {
 	font-size: 10px;
-	padding: 0 4px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	padding: 1px 5px;
 	border-radius: 3px;
-	background: var(--background-modifier-border);
-	color: var(--text-faint);
+	background: var(--v-black);
+	color: var(--v-faint);
+	border: 1px solid var(--v-border);
 }
 
-.ai-chat-find-actions {
-	display: flex;
-	gap: 6px;
+
+/* ═══════════════════════════════════════════════════════
+ * LIGHT THEME — Warm beige / off-white
+ *
+ * Obsidian adds .theme-light to the body when the user
+ * selects a light theme. We simply remap every --v-*
+ * variable to warm, paper-toned values.
+ * ═══════════════════════════════════════════════════════ */
+
+.theme-light .ai-chat-container {
+	--v-black: #f7f4ef;       /* warmest — header & input tray */
+	--v-bg: #faf8f4;          /* primary canvas */
+	--v-raised: #f0ece5;      /* assistant bubbles */
+	--v-surface: #e8e4dc;     /* user bubbles */
+	--v-border: #ddd8cf;      /* dividers */
+	--v-border-hover: #c8c2b8;
+	--v-white: #2a2520;       /* primary text (warm near-black) */
+	--v-text: #4a4440;        /* body text */
+	--v-muted: #8a847c;       /* secondary text */
+	--v-faint: #b8b2a8;       /* tertiary / decorative */
+	--v-dim: rgba(0, 0, 0, 0.03);
+	--v-glow: rgba(0, 0, 0, 0.05);
 }
 
-.ai-chat-find-open-btn {
-	padding: 5px 12px;
+/* ── Light-theme scrollbar ─────────────────────────── */
+
+.theme-light .ai-chat-messages {
+	scrollbar-color: var(--v-border) transparent;
+}
+
+.theme-light .ai-chat-messages::-webkit-scrollbar-thumb {
+	background: var(--v-border);
+}
+
+/* ── Light-theme send button (invert to dark on light) ── */
+
+.theme-light .ai-chat-send-btn {
+	background: var(--v-white);
+	color: var(--v-bg);
+}
+
+
+/* ── Light-theme streaming cursor ────────────────────── */
+
+.theme-light .ai-chat-streaming-cursor {
+	background: var(--v-muted);
+}
+
+/* ── Model select dropdown ─────────────────────────── */
+
+.ai-chat-model-select {
+	font-size: 11px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	padding: 3px 8px;
 	border-radius: 5px;
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
-	border: none;
+	border: 1px solid var(--v-border);
+	background: var(--v-bg);
+	color: var(--v-white);
+	width: 130px;
+	min-width: 80px;
 	cursor: pointer;
-	font-size: 12px;
-	font-weight: 500;
+	appearance: none;
+	transition: border-color 0.2s;
 }
 
-.ai-chat-find-open-btn:disabled {
-	opacity: 0.5;
+.ai-chat-model-select:focus {
+	outline: none;
+	border-color: var(--v-muted);
+	box-shadow: 0 0 0 2px var(--v-dim);
+}
+
+.ai-chat-model-select:disabled {
+	opacity: 0.45;
 	cursor: not-allowed;
 }
 
-.ai-chat-find-open-btn:not(:disabled):hover {
-	background: var(--interactive-accent-hover);
+/* ── Splash / welcome screen ───────────────────────── */
+
+/* When no messages, center the splash content */
+.ai-chat-container--splash .ai-chat-messages {
+	justify-content: center;
+	align-items: center;
 }
 
-.ai-chat-find-toggle-all {
-	padding: 5px 10px;
-	border-radius: 5px;
-	border: 1px solid var(--background-modifier-border);
+.ai-chat-splash {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	text-align: center;
+	padding: 24px 20px;
+	animation: messageIn 0.4s ease-out;
+	max-width: 340px;
+}
+
+.ai-chat-splash-icon {
+	width: 100px;
+	height: 100px;
+	color: var(--v-faint);
+	margin-bottom: 6px;
+	opacity: 0.8;
+}
+
+.ai-chat-splash-title {
+	font-size: 30px;
+	font-weight: 200;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--v-white);
+	margin: 0;
+}
+
+.ai-chat-splash-msg {
+	font-size: 13.5px;
+	color: var(--v-muted);
+	margin: 4px 0 0;
+	min-height: 1.6em;
+	transition: opacity 0.4s ease, transform 0.4s ease;
+	opacity: 1;
+	transform: translateY(0);
+}
+
+.ai-chat-splash-msg--fade {
+	opacity: 0;
+	transform: translateY(-5px);
+}
+
+.ai-chat-splash-hint {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+	justify-content: center;
+	margin: 8px 0 0;
+}
+
+.ai-chat-splash-hint code {
+	background: var(--v-raised);
+	padding: 2px 7px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	color: var(--v-muted);
+	border: 1px solid var(--v-border);
+}
+
+/* ── Offline state ─────────────────────────────────── */
+
+.ai-chat-offline {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14px;
+	text-align: center;
+	padding: 40px 24px;
+	animation: messageIn 0.35s ease-out;
+	max-width: 340px;
+}
+
+.ai-chat-offline-icon {
+	width: 80px;
+	height: 80px;
+	color: var(--v-faint);
+	opacity: 0.35;
+	margin-bottom: 2px;
+}
+
+.ai-chat-offline-title {
+	font-size: 17px;
+	font-weight: 400;
+	color: var(--v-text);
+	margin: 0;
+	letter-spacing: 0.02em;
+}
+
+.ai-chat-offline-body {
+	font-size: 12.5px;
+	color: var(--v-muted);
+	line-height: 1.65;
+	margin: 0;
+}
+
+.ai-chat-offline-body code {
+	background: var(--v-black);
+	padding: 1px 7px;
+	border-radius: 3px;
+	font-size: 11.5px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	color: var(--v-white);
+	border: 1px solid var(--v-border);
+}
+
+.ai-chat-offline-retry {
+	margin-top: 2px;
+	padding: 7px 20px;
+	border-radius: 6px;
+	border: 1px solid var(--v-border);
 	background: transparent;
-	color: var(--text-muted);
-	cursor: pointer;
+	color: var(--v-text);
 	font-size: 12px;
+	cursor: pointer;
+	transition: border-color 0.15s, color 0.15s;
 }
 
-.ai-chat-find-toggle-all:hover {
-	background: var(--background-modifier-hover);
-	color: var(--text-normal);
+.ai-chat-offline-retry:hover {
+	border-color: var(--v-border-hover);
+	color: var(--v-white);
+}
+
+/* ── Splash input area — slightly roomier ──────────── */
+
+.ai-chat-container--splash .ai-chat-input-area {
+	border-top: 1px solid var(--v-border);
+}
+
+.ai-chat-container--splash .ai-chat-input-row {
+	padding: 14px 16px;
 }

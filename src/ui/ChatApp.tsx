@@ -19,6 +19,15 @@ import {
 const HISTORY_KEY = 'vizier-chat-history';
 const MAX_HISTORY = 60;
 
+const SPLASH_MESSAGES = [
+	'How can I assist?',
+	'Ask me anything.',
+	'Search your vault.',
+	'Summarize a video or article.',
+	'Write a note with AI.',
+	'Find notes with natural language.',
+];
+
 interface Message {
 	role: 'user' | 'assistant';
 	content: string;
@@ -61,6 +70,26 @@ function saveHistory(app: App, messages: Message[]): void {
 	} catch { /* storage full or unavailable */ }
 }
 
+const BishopIcon = ({ className }) => (
+  <svg className={className} viewBox="0 0 32 40" fill="none"
+    stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+    {/* base */}
+    <path d="M8 37 H24 L22 34 H10 Z" strokeWidth="1.1" />
+    {/* pedestal */}
+    <path d="M11 34 L12.5 30 H19.5 L21 34" strokeWidth="1.1" />
+    {/* body — clean tapered trapezoid with slight curve */}
+    <path d="M13 30 C12 26 11.5 20 13 14 L16 10 L19 14 C20.5 20 20 26 19 30 Z" strokeWidth="1.2" />
+    {/* mitre slit */}
+    <line x1="16" y1="10" x2="16" y2="15.5" strokeWidth="0.9" />
+    {/* collar band */}
+    <line x1="13.2" y1="26" x2="18.8" y2="26" strokeWidth="0.8" opacity="0.5" />
+    {/* finial — small diamond */}
+    <path d="M16 4 L17.4 6.5 L16 9 L14.6 6.5 Z" strokeWidth="1.1" />
+    {/* pip */}
+    <circle cx="16" cy="2.8" r="0.7" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 const CopyButton = ({ content }: { content: string }) => {
 	const [copied, setCopied] = useState(false);
 
@@ -95,22 +124,50 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 	const [streaming, setStreaming] = useState(false);
 	const [model, setModel] = useState(settings.defaultModel);
 	const [pickerIndex, setPickerIndex] = useState(0);
+	const [availableModels, setAvailableModels] = useState<string[]>([]);
+	const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+	const [splashIdx, setSplashIdx] = useState(0);
+	const [splashFade, setSplashFade] = useState(false);
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	const isLoading = commandLoading || streaming;
+	const isSplash = messages.length === 0;
 
-	// Persist history whenever messages change
+	// ── Ollama model discovery ─────────────────────────────────────
+	const fetchModels = useCallback(async () => {
+		setOllamaStatus('checking');
+		try {
+			// eslint-disable-next-line no-restricted-globals
+			const res = await fetch(`${settings.ollamaUrl}/api/tags`);
+			if (!res.ok) throw new Error('not ok');
+			const data = await res.json() as { models?: { name: string }[] };
+			const names = (data.models ?? []).map((m: { name: string }) => m.name);
+			setAvailableModels(names);
+			setOllamaStatus('online');
+			// Keep current model if it's valid, otherwise fall back to first available
+			setModel(prev => (names.includes(prev) ? prev : (names[0] ?? prev)));
+		} catch {
+			setAvailableModels([]);
+			setOllamaStatus('offline');
+		}
+	}, [settings.ollamaUrl]);
+
+	useEffect(() => {
+		void fetchModels();
+	}, [fetchModels]);
+
+	// ── Persist history ────────────────────────────────────────────
 	useEffect(() => {
 		saveHistory(app, messages);
 	}, [messages]);
 
-	// Scroll to bottom on new messages
+	// ── Scroll to bottom on new messages ──────────────────────────
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
 	}, [messages, commandLoading, streaming]);
 
-	// Pre-fill input from initialCommand (set when view opens with a pending command)
+	// ── Pre-fill from initialCommand ──────────────────────────────
 	useEffect(() => {
 		if (initialCommand) {
 			setInput(initialCommand);
@@ -118,7 +175,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		}
 	}, []); // intentionally run only on mount
 
-	// Register the injector so ChatView can push commands into an already-open chat
+	// ── Register injector ─────────────────────────────────────────
 	useEffect(() => {
 		onRegisterInputInjector?.((text: string) => {
 			setInput(text);
@@ -126,6 +183,20 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		});
 	}, [onRegisterInputInjector]);
 
+	// ── Splash message cycling ─────────────────────────────────────
+	useEffect(() => {
+		if (!isSplash) return;
+		const id = setInterval(() => {
+			setSplashFade(true);
+			setTimeout(() => {
+				setSplashIdx(i => (i + 1) % SPLASH_MESSAGES.length);
+				setSplashFade(false);
+			}, 450);
+		}, 3500);
+		return () => clearInterval(id);
+	}, [isSplash]);
+
+	// ── Command picker ─────────────────────────────────────────────
 	const commandFilter = getCommandFilter(input);
 	const visibleCommands: SlashCommand[] =
 		commandFilter !== null
@@ -137,6 +208,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		setPickerIndex(0);
 	}, [commandFilter]);
 
+	// ── Message helpers ────────────────────────────────────────────
 	const addMessage = useCallback((role: 'user' | 'assistant', content: string) => {
 		setMessages(prev => [...prev, { role, content }]);
 	}, []);
@@ -164,14 +236,14 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		app.saveLocalStorage(HISTORY_KEY, null);
 	}, []);
 
-	// Auto-resize textarea
+	// ── Auto-resize textarea ───────────────────────────────────────
 	const handleTextareaInput = (e: SyntheticEvent<HTMLTextAreaElement>) => {
 		const el = e.currentTarget;
 		el.setCssStyles({ height: 'auto' });
 		el.setCssStyles({ height: `${Math.min(el.scrollHeight, 120)}px` });
 	};
 
-	// Streaming chat — only for freeform messages
+	// ── Streaming chat ─────────────────────────────────────────────
 	const sendToOllama = useCallback(async (history: Message[], userContent: string) => {
 		setStreaming(true);
 		setMessages(prev => [
@@ -182,7 +254,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 
 		try {
 			// eslint-disable-next-line no-restricted-globals
-		const response = await fetch(`${settings.ollamaUrl}/api/chat`, {
+			const response = await fetch(`${settings.ollamaUrl}/api/chat`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -240,6 +312,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		}
 	}, [model, settings.ollamaUrl]);
 
+	// ── Send handler ───────────────────────────────────────────────
 	const handleSend = useCallback(async () => {
 		const text = input.trim();
 		if (!text || isLoading) return;
@@ -259,51 +332,32 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 
 			if (parsed.id === 'write') {
 				setCommandLoading(true);
-				try {
-					await executeWrite(parsed.args, app, addMessage, model, config, settings.aiNotesFolder);
-				} finally {
-					setCommandLoading(false);
-				}
+				try { await executeWrite(parsed.args, app, addMessage, model, config, settings.aiNotesFolder); }
+				finally { setCommandLoading(false); }
 				return;
 			}
-
 			if (parsed.id === 'find') {
 				setCommandLoading(true);
-				try {
-					await executeFind(parsed.args, app, addMessage, addFindResults, model, config);
-				} finally {
-					setCommandLoading(false);
-				}
+				try { await executeFind(parsed.args, app, addMessage, addFindResults, model, config); }
+				finally { setCommandLoading(false); }
 				return;
 			}
-
 			if (parsed.id === 'summarize') {
 				setCommandLoading(true);
-				try {
-					await executeSummarize(parsed.args, addMessage, replaceLastMessage, model, config);
-				} finally {
-					setCommandLoading(false);
-				}
+				try { await executeSummarize(parsed.args, addMessage, replaceLastMessage, model, config); }
+				finally { setCommandLoading(false); }
 				return;
 			}
-
 			if (parsed.id === 'clip') {
 				setCommandLoading(true);
-				try {
-					await executeClip(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.clipsFolder);
-				} finally {
-					setCommandLoading(false);
-				}
+				try { await executeClip(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.clipsFolder); }
+				finally { setCommandLoading(false); }
 				return;
 			}
-
 			if (parsed.id === 'read') {
 				setCommandLoading(true);
-				try {
-					await executeRead(parsed.args, app, addMessage, model, config);
-				} finally {
-					setCommandLoading(false);
-				}
+				try { await executeRead(parsed.args, app, addMessage, model, config); }
+				finally { setCommandLoading(false); }
 				return;
 			}
 
@@ -311,10 +365,10 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 			return;
 		}
 
-		// Regular streaming chat
 		await sendToOllama(messages, text);
 	}, [input, isLoading, messages, app, model, settings, addMessage, addFindResults, replaceLastMessage, sendToOllama]);
 
+	// ── Command picker selection ───────────────────────────────────
 	const selectCommand = (cmd: SlashCommand) => {
 		setInput(cmd.template);
 		textareaRef.current?.focus();
@@ -351,20 +405,31 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 	};
 
 	const lastMsgIndex = messages.length - 1;
-	// No separate cursor/loading blocks — both are rendered inline inside the last bubble.
 
+	// ── Render ─────────────────────────────────────────────────────
 	return (
-		<div className="ai-chat-container">
+		<div className={`ai-chat-container${isSplash ? ' ai-chat-container--splash' : ''}`}>
+
+			{/* Header */}
 			<div className="ai-chat-header">
 				<span className="ai-chat-title">Vizier</span>
 				<span className="ai-chat-vault">{app.vault.getName()}</span>
-				<input
-					className="ai-chat-model-input"
-					value={model}
+
+				{/* Model dropdown */}
+				<select
+					className="ai-chat-model-select"
+					value={ollamaStatus === 'online' ? model : ''}
 					onChange={e => setModel(e.target.value)}
-					title="Ollama model name"
-					placeholder="Model"
-				/>
+					disabled={ollamaStatus !== 'online'}
+					title="Active Ollama model"
+				>
+					{ollamaStatus === 'checking' && <option value="">Loading…</option>}
+					{ollamaStatus === 'offline' && <option value="">Offline</option>}
+					{availableModels.map(m => (
+						<option key={m} value={m}>{m}</option>
+					))}
+				</select>
+
 				<button
 					className="ai-chat-clear-btn"
 					onClick={clearChat}
@@ -374,20 +439,49 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 				</button>
 			</div>
 
+			{/* Messages / splash / offline */}
 			<div className="ai-chat-messages">
-				{messages.length === 0 && (
-					<div className="ai-chat-empty">
-						<p>Ask me anything, or use a command.</p>
-						<p className="ai-chat-hint">
-							<code>/write</code> <code>/find</code> <code>/summarize</code> <code>/clip</code> <code>/clip long</code> <code>/read</code>
+
+				{/* Offline state */}
+				{ollamaStatus === 'offline' && (
+					<div className="ai-chat-offline">
+						<BishopIcon className="ai-chat-offline-icon" />
+						<h2 className="ai-chat-offline-title">Ollama is not running</h2>
+						<p className="ai-chat-offline-body">
+							Vizier needs a local Ollama instance.<br />
+							Start it with <code>ollama serve</code> then retry.
+						</p>
+						<button
+							className="ai-chat-offline-retry"
+							onClick={() => void fetchModels()}
+						>
+							Retry connection
+						</button>
+					</div>
+				)}
+
+				{/* Splash / welcome screen */}
+				{isSplash && ollamaStatus !== 'offline' && (
+					<div className="ai-chat-splash">
+						<BishopIcon className="ai-chat-splash-icon" />
+						<h1 className="ai-chat-splash-title">Vizier</h1>
+						<p className={`ai-chat-splash-msg${splashFade ? ' ai-chat-splash-msg--fade' : ''}`}>
+							{SPLASH_MESSAGES[splashIdx]}
+						</p>
+						<p className="ai-chat-splash-hint">
+							<code>/write</code>
+							<code>/find</code>
+							<code>/summarize</code>
+							<code>/clip</code>
+							<code>/read</code>
 						</p>
 					</div>
 				)}
+
+				{/* Chat messages */}
 				{messages.map((msg, i) => {
 					const isLast = i === lastMsgIndex;
-					// Show streaming cursor inside this bubble when streaming hasn't produced text yet
 					const showCursor = isLast && streaming && msg.role === 'assistant' && msg.content === '';
-					// Show dots after status text when a slash command is running
 					const showDots = isLast && commandLoading && msg.role === 'assistant';
 
 					return (
@@ -422,6 +516,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 				<div ref={bottomRef} />
 			</div>
 
+			{/* Input area */}
 			<div className="ai-chat-input-area">
 				{showPicker && (
 					<div className="ai-chat-command-picker">
@@ -448,12 +543,12 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 						onKeyDown={handleKeyDown}
 						placeholder="Message… or type / for commands"
 						rows={1}
-						disabled={isLoading}
+						disabled={isLoading || ollamaStatus === 'offline'}
 					/>
 					<button
 						className="ai-chat-send-btn"
 						onClick={() => void handleSend()}
-						disabled={isLoading || !input.trim()}
+						disabled={isLoading || !input.trim() || ollamaStatus === 'offline'}
 						title="Send"
 					>
 						➤
