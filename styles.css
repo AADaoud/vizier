@@ -840,3 +840,216 @@
 .ai-chat-container--splash .ai-chat-input-row {
 	padding: 14px 16px;
 }
+
+/* ── ClipLearnModal ─────────────────────────────────── */
+
+.vizier-learn-modal {
+	--v-bg: #101010;
+	--v-raised: #181818;
+	--v-surface: #1f1f1f;
+	--v-border: #262626;
+	--v-white: #e8e8e8;
+	--v-text: #b0b0b0;
+	--v-muted: #6a6a6a;
+}
+
+.theme-light .vizier-learn-modal {
+	--v-bg: #f5f2ec;
+	--v-raised: #ede9e2;
+	--v-surface: #e5e1da;
+	--v-border: #ccc8c0;
+	--v-white: #2a2520;
+	--v-text: #4a4440;
+	--v-muted: #8a847c;
+}
+
+.vizier-learn-modal .modal-content {
+	max-width: 600px;
+	max-height: 78vh;
+	overflow-y: auto;
+	padding: 24px 28px;
+	scrollbar-width: thin;
+}
+
+.vizier-learn-title {
+	font-size: 15px;
+	font-weight: 500;
+	color: var(--v-white);
+	margin: 0 0 20px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--v-border);
+	line-height: 1.4;
+}
+
+.vizier-learn-section {
+	margin-bottom: 22px;
+}
+
+.vizier-learn-section-heading {
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--v-muted);
+	margin: 0 0 10px;
+}
+
+.vizier-learn-overview-text {
+	font-size: 13px;
+	line-height: 1.65;
+	color: var(--v-text);
+	margin: 0;
+}
+
+.vizier-learn-concepts-list {
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.vizier-learn-concept-term {
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--v-white);
+	margin: 0;
+}
+
+.vizier-learn-concept-def {
+	font-size: 12.5px;
+	color: var(--v-text);
+	margin: 2px 0 0 14px;
+	line-height: 1.55;
+}
+
+.vizier-learn-takeaways-list {
+	margin: 0;
+	padding: 0 0 0 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.vizier-learn-takeaway-item {
+	font-size: 13px;
+	line-height: 1.55;
+	color: var(--v-text);
+}
+
+.vizier-learn-qa-hint {
+	font-size: 11px;
+	color: var(--v-muted);
+	margin: 0 0 10px;
+	font-style: italic;
+}
+
+.vizier-learn-qa-item {
+	border: 1px solid var(--v-border);
+	border-radius: 7px;
+	overflow: hidden;
+	margin-bottom: 8px;
+}
+
+.vizier-learn-qa-question {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 10px 14px;
+	background: var(--v-raised);
+	border: none;
+	cursor: pointer;
+	text-align: left;
+	color: var(--v-text);
+	font-size: 13px;
+	font-family: inherit;
+	transition: background 0.15s;
+	overflow: hidden;
+}
+
+.vizier-learn-qa-question:hover {
+	background: var(--v-surface);
+}
+
+.vizier-learn-qa-chevron {
+	font-size: 8px;
+	color: var(--v-muted);
+	flex-shrink: 0;
+	transition: transform 0.2s ease;
+	display: inline-block;
+}
+
+.vizier-learn-qa-item.is-open .vizier-learn-qa-chevron {
+	transform: rotate(90deg);
+}
+
+.vizier-learn-qa-question-text {
+	flex: 1;
+	line-height: 1.5;
+	text-align: left;
+	min-width: 0;
+	white-space: normal;
+	word-break: break-word;
+}
+
+.vizier-learn-qa-answer {
+	max-height: 0;
+	overflow: hidden;
+	padding: 0 14px;
+	font-size: 13px;
+	line-height: 1.6;
+	color: var(--v-muted);
+	background: var(--v-surface);
+	transition: max-height 0.25s ease, padding 0.25s ease;
+	box-sizing: border-box;
+}
+
+.vizier-learn-qa-item.is-open .vizier-learn-qa-answer {
+	max-height: 300px;
+	padding: 10px 14px;
+}
+
+.vizier-learn-btn-row {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 6px;
+	padding-top: 16px;
+	border-top: 1px solid var(--v-border);
+}
+
+/* ── Image attachment indicator ──────────────────────────────────────────── */
+
+.vizier-image-attachment {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 10px;
+	background: var(--v-surface);
+	border: 1px solid var(--v-border);
+	border-radius: 6px;
+	font-size: 11px;
+	color: var(--v-text);
+	margin-bottom: 4px;
+}
+
+.vizier-image-attachment-label {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.vizier-image-attachment-remove {
+	background: none;
+	border: none;
+	color: var(--v-muted);
+	cursor: pointer;
+	padding: 0 2px;
+	font-size: 12px;
+	line-height: 1;
+	box-shadow: none;
+}
+
+.vizier-image-attachment-remove:hover {
+	color: var(--v-text);
+}

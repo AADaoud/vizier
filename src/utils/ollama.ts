@@ -3,6 +3,7 @@ import { requestUrl } from 'obsidian';
 interface OllamaMessage {
 	role: string;
 	content: string;
+	images?: string[]; // base64-encoded images for vision models
 }
 
 export interface OllamaRequest {

@@ -13,7 +13,9 @@ import {
 	executeFind,
 	executeSummarize,
 	executeClip,
+	executeClipLearn,
 	executeRead,
+	executeHandwriting,
 } from '../commands/slashCommands';
 
 const HISTORY_KEY = 'vizier-chat-history';
@@ -130,6 +132,8 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 	const [splashFade, setSplashFade] = useState(false);
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	const pendingImageFileRef = useRef<File | null>(null);
+	const [pendingImageName, setPendingImageName] = useState<string | null>(null);
 
 	const isLoading = commandLoading || streaming;
 	const isSplash = messages.length === 0;
@@ -234,6 +238,20 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 	const clearChat = useCallback(() => {
 		setMessages([]);
 		app.saveLocalStorage(HISTORY_KEY, null);
+	}, []);
+
+	// ── Image paste handler ────────────────────────────────────────
+	const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+		const items = Array.from(e.clipboardData.items);
+		const imageItem = items.find(item => item.type.startsWith('image/'));
+		if (!imageItem) return;
+		e.preventDefault();
+		const file = imageItem.getAsFile();
+		if (!file) return;
+		pendingImageFileRef.current = file;
+		const ext = (file.type.split('/')[1] ?? 'png');
+		setPendingImageName(`paste.${ext}`);
+		setInput('/handwriting');
 	}, []);
 
 	// ── Auto-resize textarea ───────────────────────────────────────
@@ -350,8 +368,13 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 			}
 			if (parsed.id === 'clip') {
 				setCommandLoading(true);
-				try { await executeClip(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.clipsFolder); }
-				finally { setCommandLoading(false); }
+				try {
+					if (parsed.args.startsWith('learn ')) {
+						await executeClipLearn(parsed.args.slice(6), app, addMessage, replaceLastMessage, model, config, settings.clipsFolder);
+					} else {
+						await executeClip(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.clipsFolder);
+					}
+				} finally { setCommandLoading(false); }
 				return;
 			}
 			if (parsed.id === 'read') {
@@ -360,8 +383,22 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 				finally { setCommandLoading(false); }
 				return;
 			}
+			if (parsed.id === 'handwriting') {
+				const file = pendingImageFileRef.current;
+				if (!file) {
+					addMessage('assistant', 'Paste a handwritten note image into the chat first, then send `/handwriting`.');
+					return;
+				}
+				setCommandLoading(true);
+				addMessage('assistant', 'Reading image…');
+				pendingImageFileRef.current = null;
+				setPendingImageName(null);
+				try { await executeHandwriting(file, app, replaceLastMessage, model, config, settings.handwritingFolder); }
+				finally { setCommandLoading(false); }
+				return;
+			}
 
-			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /find, /summarize, /clip, /read`);
+			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /find, /summarize, /clip, /clip long, /clip learn, /read, /handwriting`);
 			return;
 		}
 
@@ -533,6 +570,16 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 						))}
 					</div>
 				)}
+				{pendingImageName && (
+					<div className="vizier-image-attachment">
+						<span className="vizier-image-attachment-label">{pendingImageName}</span>
+						<button className="vizier-image-attachment-remove" onClick={() => {
+							pendingImageFileRef.current = null;
+							setPendingImageName(null);
+							setInput('');
+						}}>✕</button>
+					</div>
+				)}
 				<div className="ai-chat-input-row">
 					<textarea
 						ref={textareaRef}
@@ -541,6 +588,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 						onChange={e => setInput(e.target.value)}
 						onInput={handleTextareaInput}
 						onKeyDown={handleKeyDown}
+						onPaste={handlePaste}
 						placeholder="Message… or type / for commands"
 						rows={1}
 						disabled={isLoading || ollamaStatus === 'offline'}

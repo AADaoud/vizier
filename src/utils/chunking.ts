@@ -43,9 +43,11 @@ export async function mapReduceSummarize(
 	model: string,
 	sourceLabel: string,
 	ollamaUrl: string,
-	detailed = false
+	detailed = false,
+	onStatus?: (msg: string) => void
 ): Promise<string> {
 	if (text.length <= THRESHOLD) {
+		onStatus?.('Generating summary…');
 		const prompt = detailed
 			? Prompts.summarizeFullDetailed(sourceLabel, text)
 			: Prompts.summarizeFull(sourceLabel, text);
@@ -53,9 +55,11 @@ export async function mapReduceSummarize(
 	}
 
 	const chunks = chunkText(text, CHUNK_SIZE);
+	onStatus?.(`Chunking text into ${chunks.length} segments…`);
 
 	const chunkSummaries: string[] = [];
-	for (const chunk of chunks) {
+	for (const [i, chunk] of chunks.entries()) {
+		onStatus?.(`Summarizing segment ${i + 1} / ${chunks.length}…`);
 		const prompt = detailed
 			? Prompts.summarizeChunkDetailed(sourceLabel, chunk)
 			: Prompts.summarizeChunk(sourceLabel, chunk);
@@ -63,6 +67,7 @@ export async function mapReduceSummarize(
 		chunkSummaries.push(summary);
 	}
 
+	onStatus?.('Combining summaries…');
 	const combined = chunkSummaries.join('\n\n');
 	const combinePrompt = detailed
 		? Prompts.summarizeCombineDetailed(sourceLabel, combined)

@@ -109,6 +109,39 @@ export const Prompts = {
 		`CONTENT:\n${text}\n\n` +
 		`NOTES:`,
 
+	// ── Clip learn: study guide generation ────────────────────────
+	learnStudyGuide: (summary: string) =>
+		`You are a study guide generation system. Output ONLY the study guide.\n\n` +
+		`Generate a study guide to help the reader understand and retain this content. Use EXACTLY this format:\n\n` +
+		`## Overview\n` +
+		`[Two sentences: what this is about and why it matters.]\n\n` +
+		`## Key Concepts\n` +
+		`**[term]**: [one-sentence definition]\n` +
+		`[4-6 terms total]\n\n` +
+		`## Main Takeaways\n` +
+		`- [takeaway]\n` +
+		`[4-5 bullet points total]\n\n` +
+		`## Review Questions\n` +
+		`Q: [question]? // A: [answer]\n` +
+		`[exactly 3 questions, each on ONE line]\n\n` +
+		`Rules:\n` +
+		`- Do NOT add any text before ## Overview or after the last Q&A line\n` +
+		`- Each Q&A pair must be on ONE line with " // " separating Q from A\n` +
+		`- Do NOT evaluate or comment on the content\n` +
+		`- Begin immediately with ## Overview\n\n` +
+		`SUMMARY:\n${summary}\n\n` +
+		`STUDY GUIDE:`,
+
+	// ── Handwriting OCR ──────────────────────────────────────────────────────
+	handwritingOCR: () =>
+		`You are a handwriting transcription system. Output ONLY the requested JSON.\n\n` +
+		`Examine the attached image and determine:\n` +
+		`1. Is it a legible handwritten note? (not blurry, not a printed document, not a photo without text)\n` +
+		`2. Does it contain handwritten text worth transcribing?\n` +
+		`3. If both: transcribe all visible text exactly, preserving line breaks as \\n.\n\n` +
+		`If the image is not legible or not a handwritten note, set transcription to "".\n` +
+		`Do NOT add commentary. Output only the JSON fields.`,
+
 	// ── Read: summarize a note ─────────────────────────────────────────────
 	readSummarize: (basename: string, content: string) =>
 		`You are a summarization system. Output ONLY the summary.\n\n` +

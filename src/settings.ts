@@ -7,6 +7,7 @@ export interface AIAgentSettings {
 	transcriptServerUrl: string;
 	clipsFolder: string;
 	aiNotesFolder: string;
+	handwritingFolder: string;
 }
 
 export const DEFAULT_SETTINGS: AIAgentSettings = {
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	transcriptServerUrl: 'http://127.0.0.1:11435',
 	clipsFolder: 'Clips',
 	aiNotesFolder: '',
+	handwritingFolder: 'Handwritten Notes',
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {
@@ -85,6 +87,17 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.aiNotesFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.aiNotesFolder = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Handwritten notes folder')
+			.setDesc('Vault folder where /handwriting saves transcribed notes.')
+			.addText(text => text
+				.setPlaceholder('Handwritten Notes')
+				.setValue(this.plugin.settings.handwritingFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.handwritingFolder = value.trim() || DEFAULT_SETTINGS.handwritingFolder;
 					await this.plugin.saveSettings();
 				}));
 	}

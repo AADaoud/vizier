@@ -232,6 +232,26 @@ export default class VizierPlugin extends Plugin {
 			},
 		});
 
+		// ── Stop transcript server ─────────────────────────────────────
+		this.addCommand({
+			id: 'ai-stop-transcript-server',
+			name: 'Stop transcript server',
+			callback: () => {
+				if (this.serverManager.isRunning) {
+					this.serverManager.stopServer();
+					new Notice('Transcript server stopped.');
+				} else {
+					void this.serverManager.isServerReachable(this.settings.transcriptServerUrl).then(reachable => {
+						if (reachable) {
+							new Notice('Transcript server is running from a previous session — restart Obsidian or kill the Python process manually.');
+						} else {
+							new Notice('Transcript server is not running.');
+						}
+					});
+				}
+			},
+		});
+
 		this.addSettingTab(new AIAgentSettingTab(this.app, this));
 	}
 

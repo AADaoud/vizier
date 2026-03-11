@@ -2,6 +2,7 @@ import { App, TFile, requestUrl } from 'obsidian';
 import { callOllama, callOllamaStructured } from '../utils/ollama';
 import { mapReduceSummarize } from '../utils/chunking';
 import { Prompts } from '../prompts';
+import { ClipLearnModal } from '../ui/ClipLearnModal';
 
 export interface SlashCommand {
 	id: string;
@@ -58,10 +59,22 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		template: '/clip long ',
 	},
 	{
+		id: 'clip learn',
+		label: '/clip learn',
+		description: 'Clip a URL, save detailed notes, and generate an interactive study guide',
+		template: '/clip learn ',
+	},
+	{
 		id: 'read',
 		label: '/read',
 		description: 'Summarize or ask a question about the active note',
 		template: '/read ',
+	},
+	{
+		id: 'handwriting',
+		label: '/handwriting',
+		description: 'Paste a handwritten note image — transcribes and saves with AI',
+		template: '/handwriting',
 	},
 ];
 
@@ -110,14 +123,19 @@ function extractYouTubeId(url: string): string | null {
 	return null;
 }
 
-async function fetchAndSummarizeYouTube(url: string, model: string, config: CommandConfig, detailed = false): Promise<string> {
+async function fetchAndSummarizeYouTube(url: string, model: string, config: CommandConfig, detailed = false, onStatus?: (msg: string) => void): Promise<string> {
 	const videoId = extractYouTubeId(url);
 	if (!videoId) throw new Error('Could not parse a YouTube video ID from that URL.');
 
-	const response = await requestUrl({
-		url: `${config.transcriptServerUrl}/transcript?video_id=${encodeURIComponent(videoId)}`,
-		throw: false,
-	});
+	let response: Awaited<ReturnType<typeof requestUrl>>;
+	try {
+		response = await requestUrl({
+			url: `${config.transcriptServerUrl}/transcript?video_id=${encodeURIComponent(videoId)}`,
+			throw: false,
+		});
+	} catch {
+		throw new Error('TRANSCRIPT_SERVER_UNREACHABLE');
+	}
 	if (response.status === 0) {
 		throw new Error('TRANSCRIPT_SERVER_UNREACHABLE');
 	}
@@ -129,30 +147,50 @@ async function fetchAndSummarizeYouTube(url: string, model: string, config: Comm
 		throw new Error('No usable transcript available for this video.');
 	}
 
-	return mapReduceSummarize(data.transcript, model, 'YouTube video', config.ollamaUrl, detailed);
+	return mapReduceSummarize(data.transcript, model, 'YouTube video', config.ollamaUrl, detailed, onStatus);
 }
 
-async function fetchAndSummarizeArticle(url: string, model: string, ollamaUrl: string, detailed = false): Promise<string> {
+async function fetchAndSummarizeArticle(url: string, model: string, ollamaUrl: string, detailed = false, onStatus?: (msg: string) => void): Promise<string> {
 	// Use Jina AI Reader to fetch a clean, reader-friendly version of the page.
 	// This handles JavaScript-rendered content, paywalls, and encoding issues far
 	// better than fetching raw HTML. No API key required.
-	const jinaUrl = `https://r.jina.ai/${url}`;
-	const response = await requestUrl({
-		url: jinaUrl,
-		headers: {
-			'Accept': 'text/plain',
-			'X-Return-Format': 'markdown',
-		},
-		throw: false,
-	});
-	if (response.status === 429) throw new Error('Jina rate limit reached (20 requests/minute). Wait a moment and try again.');
-	if (response.status >= 400) throw new Error(`Could not retrieve article (HTTP ${response.status}). The page may be blocked or unavailable.`);
-	const text = response.text.trim();
-	const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
-	if (text.length < 500 || wordCount < 50) {
-		throw new Error('Could not extract readable content from that URL. The page may be a redirect, require authentication, or have no readable text.');
+	let jinaError: Error | null = null;
+	try {
+		const jinaUrl = `https://r.jina.ai/${url}`;
+		const response = await requestUrl({
+			url: jinaUrl,
+			headers: {
+				'Accept': 'text/plain',
+				'X-Return-Format': 'markdown',
+			},
+			throw: false,
+		});
+		if (response.status === 429) throw new Error('Jina rate limit reached (20 requests/minute). Wait a moment and try again.');
+		if (response.status >= 400) throw new Error(`Could not retrieve article (HTTP ${response.status}). The page may be blocked or unavailable.`);
+		const text = response.text.trim();
+		const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+		if (text.length < 500 || wordCount < 50) {
+			throw new Error('Could not extract readable content from that URL. The page may be a redirect, require authentication, or have no readable text.');
+		}
+		return await mapReduceSummarize(text, model, 'article', ollamaUrl, detailed, onStatus);
+	} catch (err) {
+		jinaError = err instanceof Error ? err : new Error(String(err));
 	}
-	return mapReduceSummarize(text, model, 'article', ollamaUrl, detailed);
+
+	// Jina failed — fall back to raw HTML fetch
+	onStatus?.('Jina unavailable — fetching raw HTML…');
+	const rawRes = await requestUrl({ url, throw: false });
+	if (rawRes.status === 0 || rawRes.status >= 400) {
+		throw jinaError;
+	}
+	const stripped = rawRes.text
+		.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+		.replace(/<[^>]+>/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+	const wordCount = stripped.split(/\s+/).filter(w => w.length > 0).length;
+	if (stripped.length < 500 || wordCount < 50) throw jinaError;
+	return mapReduceSummarize(stripped, model, 'article', ollamaUrl, detailed, onStatus);
 }
 
 // --- /write ---
@@ -401,14 +439,16 @@ export async function executeClip(
 	const modeLabel = detailed ? 'detailed notes' : 'summary';
 	addMessage('assistant', `Fetching ${modeLabel}…`);
 
+	const onStatus = (msg: string) => replaceMessage('assistant', msg);
+
 	let summary: string;
 	try {
 		if (isYouTube) {
 			replaceMessage('assistant', 'Fetching transcript…');
-			summary = await fetchAndSummarizeYouTube(url, model, config, detailed);
+			summary = await fetchAndSummarizeYouTube(url, model, config, detailed, onStatus);
 		} else {
 			replaceMessage('assistant', 'Fetching page…');
-			summary = await fetchAndSummarizeArticle(url, model, config.ollamaUrl, detailed);
+			summary = await fetchAndSummarizeArticle(url, model, config.ollamaUrl, detailed, onStatus);
 		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
@@ -442,7 +482,7 @@ export async function executeClip(
 	const yamlTags = buildYamlTags(['clip', ...meta.tags]);
 	const noteContent = `---\nsource: "${url}"\ndate: ${date}\ntags:\n${yamlTags}\n---\n\n${summary}`;
 
-	replaceMessage('assistant', 'Saving…');
+	replaceMessage('assistant', 'Writing to file…');
 	try {
 		const folderExists = app.vault.getAbstractFileByPath(clipsFolder);
 		if (!folderExists) {
@@ -460,6 +500,161 @@ export async function executeClip(
 		const msg = err instanceof Error ? err.message : String(err);
 		replaceMessage('assistant', `Failed to save note: ${msg}`);
 	}
+}
+
+// --- /clip learn ---
+
+export async function executeClipLearn(
+	args: string,
+	app: App,
+	addMessage: AddMessage,
+	replaceMessage: ReplaceMessage,
+	model: string,
+	config: CommandConfig,
+	clipsFolder: string
+): Promise<void> {
+	const url = args.trim();
+	if (!url || !/^https?:\/\//.test(url) || !isLikelyValidUrl(url)) {
+		addMessage('assistant', 'Usage: `/clip learn <url>` — fetches, saves detailed notes, and generates a study guide to reinforce learning.');
+		return;
+	}
+
+	const isYouTube = /youtube\.com|youtu\.be/.test(url);
+	addMessage('assistant', 'Fetching content…');
+
+	const onStatus = (msg: string) => replaceMessage('assistant', msg);
+
+	let summary: string;
+	try {
+		if (isYouTube) {
+			replaceMessage('assistant', 'Fetching transcript…');
+			summary = await fetchAndSummarizeYouTube(url, model, config, true, onStatus);
+		} else {
+			replaceMessage('assistant', 'Fetching page…');
+			summary = await fetchAndSummarizeArticle(url, model, config.ollamaUrl, true, onStatus);
+		}
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (isYouTube && msg.includes('TRANSCRIPT_SERVER_UNREACHABLE')) {
+			replaceMessage(
+				'assistant',
+				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
+			);
+		} else {
+			replaceMessage('assistant', `Failed to fetch: ${msg}`);
+		}
+		return;
+	}
+
+	replaceMessage('assistant', 'Extracting metadata…');
+	let meta: ClipMetadata;
+	try {
+		meta = await callOllamaStructured<ClipMetadata>({
+			ollamaUrl: config.ollamaUrl,
+			model,
+			messages: [{ role: 'user', content: Prompts.clipMetadata(summary) }],
+			format: CLIP_SCHEMA,
+		});
+	} catch {
+		meta = { title: new URL(url).hostname, tags: ['clip'] };
+	}
+
+	const date = new Date().toISOString().slice(0, 10);
+	const safeTitle = sanitizeFilename(meta.title);
+	const filename = `${date} - ${safeTitle}`;
+	const yamlTags = buildYamlTags(['clip', 'learn', ...meta.tags]);
+	const noteContent = `---\nsource: "${url}"\ndate: ${date}\ntags:\n${yamlTags}\n---\n\n${summary}`;
+
+	replaceMessage('assistant', 'Writing to file…');
+	try {
+		const folderExists = app.vault.getAbstractFileByPath(clipsFolder);
+		if (!folderExists) {
+			await app.vault.createFolder(clipsFolder);
+		}
+		const filePath = `${clipsFolder}/${filename}.md`;
+		const existing = app.vault.getAbstractFileByPath(filePath);
+		if (existing instanceof TFile) {
+			await app.vault.modify(existing, noteContent);
+		} else {
+			await app.vault.create(filePath, noteContent);
+		}
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		replaceMessage('assistant', `Failed to save note: ${msg}`);
+		return;
+	}
+
+	replaceMessage('assistant', 'Generating study guide…');
+	let studyGuide: string;
+	try {
+		studyGuide = await callOllama({
+			ollamaUrl: config.ollamaUrl,
+			model,
+			messages: [{ role: 'user', content: Prompts.learnStudyGuide(summary) }],
+		});
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		replaceMessage('assistant', `Saved to **[[${filename}]]** — but failed to generate study guide: ${msg}`);
+		return;
+	}
+
+	// Build a compact chat message: overview + concept terms + takeaways
+	const sections = parseStudyGuideSections(studyGuide);
+	const chatParts: string[] = [];
+	if (sections.overview) chatParts.push(sections.overview);
+	if (sections.keyConcepts.length > 0) {
+		chatParts.push(`\n**Key Concepts:** ${sections.keyConcepts.map(c => c.term).join(' · ')}`);
+	}
+	if (sections.takeaways.length > 0) {
+		chatParts.push(`\n**Takeaways:**\n${sections.takeaways.map(t => `- ${t}`).join('\n')}`);
+	}
+	if (sections.reviewQA.length > 0) {
+		chatParts.push(`\n*Study guide and review questions are open in a panel.*`);
+	}
+
+	replaceMessage('assistant', chatParts.join('\n'));
+	addMessage('assistant', `Saved to **[[${filename}]]**`);
+
+	new ClipLearnModal(app, meta.title, studyGuide).open();
+}
+
+function parseStudyGuideSections(content: string): {
+	overview: string;
+	keyConcepts: Array<{ term: string }>;
+	takeaways: string[];
+	reviewQA: Array<{ question: string; answer: string }>;
+} {
+	const result = { overview: '', keyConcepts: [] as Array<{ term: string }>, takeaways: [] as string[], reviewQA: [] as Array<{ question: string; answer: string }> };
+	const parts = content.split(/^##\s+/m).filter(p => p.trim());
+	for (const part of parts) {
+		const newline = part.indexOf('\n');
+		if (newline === -1) continue;
+		const heading = part.slice(0, newline).trim().toLowerCase();
+		const body = part.slice(newline + 1).trim();
+		if (heading.includes('overview')) {
+			result.overview = body.replace(/\n+/g, ' ').trim();
+		} else if (heading.includes('key concept')) {
+			for (const line of body.split('\n')) {
+				const match = line.match(/^\*\*(.+?)\*\*/);
+				if (match && match[1]) result.keyConcepts.push({ term: match[1].trim() });
+			}
+		} else if (heading.includes('takeaway')) {
+			for (const line of body.split('\n')) {
+				const stripped = line.replace(/^[-*]\s+/, '').trim();
+				if (stripped) result.takeaways.push(stripped);
+			}
+		} else if (heading.includes('review') || heading.includes('question')) {
+			for (const line of body.split('\n')) {
+				const trimmed = line.trim();
+				const sepIdx = trimmed.indexOf(' // ');
+				if (sepIdx === -1) continue;
+				const q = trimmed.slice(0, sepIdx).replace(/^Q:\s*/i, '').trim();
+				const a = trimmed.slice(sepIdx + 4).replace(/^A:\s*/i, '').trim();
+				if (q && a) result.reviewQA.push({ question: q, answer: a });
+			}
+		}
+	}
+	return result;
 }
 
 // --- /read ---
@@ -497,4 +692,120 @@ export async function executeRead(
 		});
 		addMessage('assistant', answer);
 	}
+}
+
+// --- /handwriting ---
+
+interface HandwritingOCRResult {
+	legible: boolean;
+	is_note: boolean;
+	transcription: string;
+}
+
+const HANDWRITING_SCHEMA = {
+	type: 'object' as const,
+	properties: {
+		legible: { type: 'boolean' },
+		is_note: { type: 'boolean' },
+		transcription: { type: 'string' },
+	},
+	required: ['legible', 'is_note', 'transcription'],
+};
+
+function getAttachmentFolder(app: App): string {
+	try {
+		const cfg = (app.vault as unknown as { getConfig: (key: string) => string }).getConfig('attachmentFolderPath');
+		if (cfg && cfg !== '/' && !cfg.startsWith('./')) return cfg;
+	} catch { /* */ }
+	return 'Attachments';
+}
+
+export async function executeHandwriting(
+	imageFile: File,
+	app: App,
+	replaceMessage: ReplaceMessage,
+	model: string,
+	config: CommandConfig,
+	notesFolder: string,
+): Promise<void> {
+	// 1. Read image as base64 for Ollama
+	replaceMessage('assistant', 'Reading image…');
+	const buffer = await imageFile.arrayBuffer();
+	const uint8 = new Uint8Array(buffer);
+	let binary = '';
+	for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i] ?? 0);
+	const base64 = btoa(binary);
+
+	// 2. Run OCR via vision model
+	replaceMessage('assistant', 'Transcribing handwriting…');
+	let ocrResult: HandwritingOCRResult;
+	try {
+		ocrResult = await callOllamaStructured<HandwritingOCRResult>({
+			ollamaUrl: config.ollamaUrl,
+			model,
+			messages: [{ role: 'user', content: Prompts.handwritingOCR(), images: [base64] }],
+			format: HANDWRITING_SCHEMA,
+		});
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		replaceMessage('assistant', `OCR failed: ${msg}`);
+		return;
+	}
+
+	if (!ocrResult.legible || !ocrResult.is_note) {
+		replaceMessage('assistant', !ocrResult.legible
+			? 'Image is not legible enough to transcribe. Make sure it is in focus and well-lit.'
+			: 'Image does not appear to be a handwritten note.');
+		return;
+	}
+
+	if (!ocrResult.transcription.trim()) {
+		replaceMessage('assistant',
+			`The model returned no transcription text. Make sure you are using a vision-capable model (e.g. \`llava\`, \`minicpm-v\`, \`gemma3:12b\`). The current model is \`${model}\`.`
+		);
+		return;
+	}
+
+	// 3. Save image to vault attachment folder
+	replaceMessage('assistant', 'Saving image…');
+	const attachmentFolder = getAttachmentFolder(app);
+	const timestamp = Date.now();
+	const ext = imageFile.name.includes('.') ? (imageFile.name.split('.').pop() ?? 'png') : 'png';
+	const imgFilename = `handwriting-${timestamp}.${ext}`;
+	const imgPath = attachmentFolder ? `${attachmentFolder}/${imgFilename}` : imgFilename;
+
+	try {
+		const folderExists = attachmentFolder && app.vault.getAbstractFileByPath(attachmentFolder);
+		if (attachmentFolder && !folderExists) await app.vault.createFolder(attachmentFolder);
+		await app.vault.createBinary(imgPath, buffer);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		replaceMessage('assistant', `Failed to save image: ${msg}`);
+		return;
+	}
+
+	// 4. Create note with embedded image and transcription callout
+	replaceMessage('assistant', 'Creating note…');
+	const date = new Date().toISOString().slice(0, 10);
+	const noteBaseName = `${date} - Handwritten Note`;
+	const transcriptionLines = ocrResult.transcription.split('\n').map(l => `> ${l}`).join('\n');
+	const noteContent = `---\ndate: ${date}\ntags:\n  - handwriting\n---\n\n![[${imgFilename}]]\n\n> [!note] Transcription\n${transcriptionLines}\n`;
+
+	const baseNotePath = `${notesFolder}/${noteBaseName}.md`;
+	const noteFilePath = app.vault.getAbstractFileByPath(baseNotePath)
+		? `${notesFolder}/${noteBaseName} ${timestamp}.md`
+		: baseNotePath;
+	const noteFilename = noteFilePath.replace(/\.md$/, '').split('/').pop() ?? noteBaseName;
+
+	try {
+		const notesFolderExists = app.vault.getAbstractFileByPath(notesFolder);
+		if (!notesFolderExists) await app.vault.createFolder(notesFolder);
+		await app.vault.create(noteFilePath, noteContent);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		replaceMessage('assistant', `Image saved but failed to create note: ${msg}`);
+		return;
+	}
+
+	replaceMessage('assistant', `Saved to **[[${noteFilename}]]**\n\n> [!note] Transcription\n${transcriptionLines}`);
 }
