@@ -7,6 +7,22 @@ function spawnProc(cmd: string, args: string[], opts?: SpawnOptions): ChildProce
 	return spawn(cmd, args, opts ?? {});
 }
 
+function runCmd(cmd: string, args: string[], cwd: string, log: (m: string) => void): Promise<boolean> {
+	return new Promise((resolve) => {
+		const proc = spawnProc(cmd, args, { cwd });
+		proc.stdout?.on('data', (d: { toString(): string }) => log(d.toString().trimEnd()));
+		proc.stderr?.on('data', (d: { toString(): string }) => log(d.toString().trimEnd()));
+		proc.on('close', (code: number) => {
+			if (code !== 0) log(`Command failed (exit ${String(code)}).`);
+			resolve(code === 0);
+		});
+		proc.on('error', (err: Error) => {
+			log(`Error: ${err.message}`);
+			resolve(false);
+		});
+	});
+}
+
 /**
  * Manages the transcript server child process lifecycle.
  * Attach to the plugin so it can be stopped on unload.
@@ -140,7 +156,7 @@ export class ServerSetupModal extends Modal {
 
 				log(`Using: ${python}`);
 				log('Creating virtual environment (.venv)…');
-				const venvOk = await this.runCmd(python, ['-m', 'venv', '.venv'], pluginDir, log);
+				const venvOk = await runCmd(python, ['-m', 'venv', '.venv'], pluginDir, log);
 				if (!venvOk) {
 					startBtn.disabled = false;
 					cancelBtn.disabled = false;
@@ -148,8 +164,8 @@ export class ServerSetupModal extends Modal {
 				}
 
 				const pip = path.join(pluginDir, '.venv', 'bin', 'pip3');
-				log('Installing dependencies…');
-				const pipOk = await this.runCmd(pip, ['install', 'youtube-transcript-api', 'easyocr', 'pillow'], pluginDir, log);
+				log('Installing youtube-transcript-api…');
+				const pipOk = await runCmd(pip, ['install', 'youtube-transcript-api'], pluginDir, log);
 				if (!pipOk) {
 					startBtn.disabled = false;
 					cancelBtn.disabled = false;
@@ -179,12 +195,13 @@ export class ServerSetupModal extends Modal {
 	}
 
 	private async checkModelsAndPrompt(): Promise<void> {
+		const pluginDir = (this.manager as unknown as { pluginDir: string }).pluginDir;
 		try {
 			const res = await requestUrl({ url: `${this.serverUrl}/models/status`, throw: false });
 			if (res.status === 200) {
 				const data = res.json as { cached?: boolean };
 				if (!data.cached) {
-					new ModelDownloadModal(this.app, this.serverUrl).open();
+					new ModelDownloadModal(this.app, this.serverUrl, pluginDir).open();
 				}
 			}
 		} catch { /* ignore */ }
@@ -218,21 +235,6 @@ export class ServerSetupModal extends Modal {
 		});
 	}
 
-	private runCmd(cmd: string, args: string[], cwd: string, log: (m: string) => void): Promise<boolean> {
-		return new Promise((resolve) => {
-			const proc = spawnProc(cmd, args, { cwd });
-			proc.stdout?.on('data', (d: { toString(): string }) => log(d.toString().trimEnd()));
-			proc.stderr?.on('data', (d: { toString(): string }) => log(d.toString().trimEnd()));
-			proc.on('close', (code: number) => {
-				if (code !== 0) log(`Command failed (exit ${String(code)}).`);
-				resolve(code === 0);
-			});
-			proc.on('error', (err: Error) => {
-				log(`Error: ${err.message}`);
-				resolve(false);
-			});
-		});
-	}
 }
 
 /**
@@ -242,21 +244,32 @@ export class ServerSetupModal extends Modal {
  */
 export class ModelDownloadModal extends Modal {
 	private serverUrl: string;
+	private pluginDir: string;
 	private pollInterval: ReturnType<typeof setInterval> | null = null;
 	private pollCount = 0;
-	private readonly MAX_POLLS = 60; // 5 minutes at 5 s intervals
+	private readonly MAX_POLLS = 120; // 10 minutes at 5 s intervals
 
-	constructor(app: App, serverUrl: string) {
+	constructor(app: App, serverUrl: string, pluginDir: string) {
 		super(app);
 		this.serverUrl = serverUrl;
+		this.pluginDir = pluginDir;
 	}
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl('h2', { text: 'OCR model download' });
+		contentEl.createEl('h2', { text: 'OCR setup' });
 		contentEl.createEl('p', {
-			text: 'Handwriting OCR requires model files (~250 MB) that will be downloaded once and cached locally. This only happens on first use.',
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			text: 'Handwriting OCR requires ML libraries (~1.5 GB including PyTorch) and model files. These are installed once and cached locally.',
 		});
+
+		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
+		pre.style.display = 'none';
+		const log = (msg: string) => {
+			pre.style.display = 'block';
+			pre.textContent += msg + '\n';
+			pre.scrollTop = pre.scrollHeight;
+		};
 
 		const spinner = contentEl.createDiv({ cls: 'vizier-spinner' });
 		spinner.style.display = 'none';
@@ -275,9 +288,20 @@ export class ModelDownloadModal extends Modal {
 			skipBtn.disabled = true;
 			spinner.style.display = 'block';
 			statusEl.style.display = 'block';
-			statusEl.textContent = 'Downloading models… this may take several minutes.';
+			statusEl.textContent = 'Installing OCR libraries… this may take several minutes.';
 
-			// Trigger download (non-blocking — server returns 202 immediately)
+			// Install easyocr (heavy: PyTorch etc.)
+			const pip = path.join(this.pluginDir, '.venv', 'bin', 'pip3');
+			const pipOk = await runCmd(pip, ['install', 'easyocr'], this.pluginDir, log);
+			if (!pipOk) {
+				spinner.style.display = 'none';
+				statusEl.textContent = 'Installation failed. Check the log above.';
+				return;
+			}
+
+			statusEl.textContent = 'Downloading OCR models… this may take several minutes.';
+
+			// Trigger model download (non-blocking — server returns 202 immediately)
 			try {
 				await requestUrl({ url: `${this.serverUrl}/models/download`, method: 'POST', throw: false });
 			} catch { /* ignore */ }

@@ -7,7 +7,6 @@ Run:     python3 vizier_server.py
 """
 
 import base64
-import io
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -83,14 +82,12 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(400, {'error': 'missing image field'})
             return
         try:
-            from PIL import Image
             img_bytes = base64.b64decode(image_b64)
-            img = Image.open(io.BytesIO(img_bytes))
             reader = get_ocr_reader()
-            results = reader.readtext(img, detail=0, paragraph=True)
+            results = reader.readtext(img_bytes, detail=0, paragraph=True)
             self._reply(200, {'text': '\n'.join(results)})
         except ImportError:
-            self._reply(503, {'error': 'easyocr/pillow not installed. Run "Vizier: Setup / start Vizier server" to install dependencies.'})
+            self._reply(503, {'error': 'easyocr not installed. Run "Vizier: Setup / start Vizier server" to install dependencies.'})
         except Exception as e:
             self._reply(500, {'error': str(e)})
 
