@@ -1,7 +1,7 @@
 {
 	"id": "vizier",
 	"name": "Vizier",
-	"version": "0.4.1",
+	"version": "0.4.8",
 	"minAppVersion": "1.4.0",
 	"description": "Vizier — a local, privacy-first AI agent for Obsidian powered by Ollama. Chat, write notes, search your vault, summarize YouTube videos and articles, and clip web content.",
 	"author": "AADaoud",
