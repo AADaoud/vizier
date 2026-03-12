@@ -1,5 +1,8 @@
 # Vizier
-<img width="344" height="651" alt="image" src="https://github.com/user-attachments/assets/bfb34136-a6b9-45cf-9f4f-71c9b51dda01" />
+<div align="center">
+  <img width="761" height="351" alt="Screenshot from 2026-03-11 02-44-49" 
+    src="https://github.com/user-attachments/assets/0786a8bb-141b-42a5-9bc4-de19967c2115" />
+</div>
 
 A local, privacy-first AI agent for Obsidian powered by [Ollama](https://ollama.com). Does what you ask — chat, write notes, search your vault, summarize videos and articles. Everything runs on your machine — no cloud accounts, no API keys, no telemetry.
 
