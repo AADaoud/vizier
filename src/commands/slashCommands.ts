@@ -764,21 +764,19 @@ export async function executeHandwriting(
 		return;
 	}
 
-	// 3. Ollama cleanup pass (non-fatal)
+	// 3. Vision-assisted reconstruction (non-fatal, falls back to raw OCR)
 	try {
-		replaceMessage('assistant', 'Cleaning up OCR text…');
-		transcriptionText = await callOllama({
+		replaceMessage('assistant', 'Reconstructing with vision model…');
+		const visionResult = await callOllama({
 			ollamaUrl: config.ollamaUrl,
 			model,
-			messages: [{ role: 'user', content: Prompts.handwritingCleanup(transcriptionText) }],
+			messages: [{ role: 'user', content: Prompts.handwritingReconstruct(transcriptionText), images: [base64] }],
 		});
+		if (visionResult.trim()) {
+			transcriptionText = visionResult;
+		}
 	} catch {
-		// cleanup failed — use raw OCR text
-	}
-
-	if (!transcriptionText.trim()) {
-		replaceMessage('assistant', 'OCR returned no text. Check the image is clear and contains handwriting.');
-		return;
+		// vision pass failed — keep raw OCR text
 	}
 
 	// 4. Save image to vault attachment folder
