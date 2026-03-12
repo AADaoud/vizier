@@ -98,7 +98,12 @@ class Handler(BaseHTTPRequestHandler):
             os.path.isdir(model_dir)
             and any(f.endswith('.pth') for f in os.listdir(model_dir))
         )
-        self._reply(200, {'cached': cached})
+        try:
+            import easyocr as _  # noqa: F401
+            installed = True
+        except ImportError:
+            installed = False
+        self._reply(200, {'cached': cached, 'installed': installed})
 
     def _handle_models_download(self) -> None:
         import threading

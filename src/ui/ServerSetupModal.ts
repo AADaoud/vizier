@@ -199,8 +199,8 @@ export class ServerSetupModal extends Modal {
 		try {
 			const res = await requestUrl({ url: `${this.serverUrl}/models/status`, throw: false });
 			if (res.status === 200) {
-				const data = res.json as { cached?: boolean };
-				if (!data.cached) {
+				const data = res.json as { cached?: boolean; installed?: boolean };
+				if (!data.installed || !data.cached) {
 					new ModelDownloadModal(this.app, this.serverUrl, pluginDir).open();
 				}
 			}
