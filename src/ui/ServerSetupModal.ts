@@ -257,6 +257,7 @@ export class ModelDownloadModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		contentEl.createEl('h2', { text: 'OCR setup' });
 		contentEl.createEl('p', {
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -264,18 +265,18 @@ export class ModelDownloadModal extends Modal {
 		});
 
 		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
-		pre.style.display = 'none';
+		pre.addClass('vizier-hidden');
 		const log = (msg: string) => {
-			pre.style.display = 'block';
+			pre.removeClass('vizier-hidden');
 			pre.textContent += msg + '\n';
 			pre.scrollTop = pre.scrollHeight;
 		};
 
 		const spinner = contentEl.createDiv({ cls: 'vizier-spinner' });
-		spinner.style.display = 'none';
+		spinner.addClass('vizier-hidden');
 
 		const statusEl = contentEl.createEl('p', { cls: 'vizier-model-status' });
-		statusEl.style.display = 'none';
+		statusEl.addClass('vizier-hidden');
 
 		const btnRow = contentEl.createDiv({ cls: 'modal-button-container' });
 		const downloadBtn = btnRow.createEl('button', { text: 'Download now', cls: 'mod-cta' });
@@ -286,19 +287,21 @@ export class ModelDownloadModal extends Modal {
 		downloadBtn.onclick = async () => {
 			downloadBtn.disabled = true;
 			skipBtn.disabled = true;
-			spinner.style.display = 'block';
-			statusEl.style.display = 'block';
+			spinner.removeClass('vizier-hidden');
+			statusEl.removeClass('vizier-hidden');
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			statusEl.textContent = 'Installing OCR libraries… this may take several minutes.';
 
 			// Install easyocr (heavy: PyTorch etc.)
 			const pip = path.join(this.pluginDir, '.venv', 'bin', 'pip3');
 			const pipOk = await runCmd(pip, ['install', 'easyocr'], this.pluginDir, log);
 			if (!pipOk) {
-				spinner.style.display = 'none';
+				spinner.addClass('vizier-hidden');
 				statusEl.textContent = 'Installation failed. Check the log above.';
 				return;
 			}
 
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			statusEl.textContent = 'Downloading OCR models… this may take several minutes.';
 
 			// Trigger model download (non-blocking — server returns 202 immediately)
@@ -323,7 +326,7 @@ export class ModelDownloadModal extends Modal {
 				const data = res.json as { cached?: boolean };
 				if (data.cached) {
 					this.stopPolling();
-					spinner.style.display = 'none';
+					spinner.addClass('vizier-hidden');
 					statusEl.textContent = 'Models downloaded and ready.';
 					setTimeout(() => this.close(), 1500);
 					return;
@@ -333,7 +336,7 @@ export class ModelDownloadModal extends Modal {
 
 		if (this.pollCount >= this.MAX_POLLS) {
 			this.stopPolling();
-			spinner.style.display = 'none';
+			spinner.addClass('vizier-hidden');
 			statusEl.textContent = 'Download timed out. Models will download automatically on first use.';
 		}
 	}

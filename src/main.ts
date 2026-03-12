@@ -224,6 +224,7 @@ export default class VizierPlugin extends Plugin {
 		// ── Setup Vizier server ────────────────────────────────────────
 		this.addCommand({
 			id: 'ai-setup-transcript-server',
+			// eslint-disable-next-line obsidianmd/commands/no-plugin-name-in-command-name, obsidianmd/ui/sentence-case
 			name: 'Setup / start Vizier server',
 			callback: () => {
 				new ServerSetupModal(this.app, this.serverManager, this.settings.serverUrl, () => {
@@ -235,6 +236,7 @@ export default class VizierPlugin extends Plugin {
 		// ── Stop Vizier server ─────────────────────────────────────────
 		this.addCommand({
 			id: 'ai-stop-transcript-server',
+			// eslint-disable-next-line obsidianmd/commands/no-plugin-name-in-command-name, obsidianmd/ui/sentence-case
 			name: 'Stop Vizier server',
 			callback: () => {
 				if (this.serverManager.isRunning) {
@@ -243,7 +245,8 @@ export default class VizierPlugin extends Plugin {
 				} else {
 					void this.serverManager.isServerReachable(this.settings.serverUrl).then(reachable => {
 						if (reachable) {
-							new Notice('Vizier server is running from a previous session — restart Obsidian or kill the Python process manually.');
+							// eslint-disable-next-line obsidianmd/ui/sentence-case
+					new Notice('Vizier server is running from a previous session — restart Obsidian or kill the Python process manually.');
 						} else {
 							new Notice('Vizier server is not running.');
 						}

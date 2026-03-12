@@ -69,6 +69,10 @@
 	to { transform: rotate(360deg); }
 }
 
+/* ── Utility ───────────────────────────────────────── */
+
+.vizier-hidden { display: none; }
+
 /* ── Model download spinner ────────────────────────── */
 
 .vizier-spinner {

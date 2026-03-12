@@ -35,7 +35,7 @@ export class ClipLearnModal extends Modal {
 		// Key Concepts
 		if (sections.keyConcepts.length > 0) {
 			const conceptsEl = contentEl.createDiv({ cls: 'vizier-learn-section' });
-			conceptsEl.createEl('h3', { text: 'Key Concepts', cls: 'vizier-learn-section-heading' });
+			conceptsEl.createEl('h3', { text: 'Key concepts', cls: 'vizier-learn-section-heading' });
 			const listEl = conceptsEl.createEl('dl', { cls: 'vizier-learn-concepts-list' });
 			for (const { term, definition } of sections.keyConcepts) {
 				listEl.createEl('dt', { text: term, cls: 'vizier-learn-concept-term' });
@@ -46,7 +46,7 @@ export class ClipLearnModal extends Modal {
 		// Main Takeaways
 		if (sections.takeaways.length > 0) {
 			const takeawaysEl = contentEl.createDiv({ cls: 'vizier-learn-section' });
-			takeawaysEl.createEl('h3', { text: 'Main Takeaways', cls: 'vizier-learn-section-heading' });
+			takeawaysEl.createEl('h3', { text: 'Main takeaways', cls: 'vizier-learn-section-heading' });
 			const ulEl = takeawaysEl.createEl('ul', { cls: 'vizier-learn-takeaways-list' });
 			for (const item of sections.takeaways) {
 				ulEl.createEl('li', { text: item, cls: 'vizier-learn-takeaway-item' });
@@ -56,7 +56,7 @@ export class ClipLearnModal extends Modal {
 		// Review Questions — interactive reveal
 		if (sections.reviewQA.length > 0) {
 			const qaEl = contentEl.createDiv({ cls: 'vizier-learn-section' });
-			qaEl.createEl('h3', { text: 'Review Questions', cls: 'vizier-learn-section-heading' });
+			qaEl.createEl('h3', { text: 'Review questions', cls: 'vizier-learn-section-heading' });
 			qaEl.createEl('p', {
 				text: 'Click a question to reveal the answer.',
 				cls: 'vizier-learn-qa-hint',

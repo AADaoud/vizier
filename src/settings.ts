@@ -59,6 +59,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Vizier server URL')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Base URL of the local Vizier server (vizier_server.py). Provides YouTube transcripts and handwriting OCR.')
 			.addText(text => text
 				.setPlaceholder('http://127.0.0.1:11435')
@@ -94,7 +95,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Handwritten notes folder')
 			.setDesc('Vault folder where /handwriting saves transcribed notes.')
 			.addText(text => text
-				.setPlaceholder('Handwritten Notes')
+				.setPlaceholder('Handwritten notes')
 				.setValue(this.plugin.settings.handwritingFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.handwritingFolder = value.trim() || DEFAULT_SETTINGS.handwritingFolder;
