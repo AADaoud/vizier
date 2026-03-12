@@ -14,7 +14,8 @@ A local, privacy-first AI agent for Obsidian powered by [Ollama](https://ollama.
 | `/find <query>` | Natural-language search across your vault |
 | `/summarize <url>` | Summarize a YouTube video or web article |
 | `/clip <url>` | Fetch, summarize, and save a URL to your Clips folder |
-| `/clip long <url>` | Clip with detailed notes — ideal for lectures or long reads |
+| `/clip long <url>` | Clip with detailed notes — ideal for long commentaries or reads |
+| `/clip learn <url>` | Clip with detailed notes plus a study guide popup — ideal for lectures |
 | `/read` | Summarize or ask a question about the active note |
 | `/handwriting` | OCR a photo of handwritten notes and save as a vault note |
 | Free chat | Stream a conversation with any Ollama model |
