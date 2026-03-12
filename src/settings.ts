@@ -4,7 +4,7 @@ import VizierPlugin from './main';
 export interface AIAgentSettings {
 	ollamaUrl: string;
 	defaultModel: string;
-	transcriptServerUrl: string;
+	serverUrl: string;
 	clipsFolder: string;
 	aiNotesFolder: string;
 	handwritingFolder: string;
@@ -13,7 +13,7 @@ export interface AIAgentSettings {
 export const DEFAULT_SETTINGS: AIAgentSettings = {
 	ollamaUrl: 'http://localhost:11434',
 	defaultModel: 'gemma3:4b',
-	transcriptServerUrl: 'http://127.0.0.1:11435',
+	serverUrl: 'http://127.0.0.1:11435',
 	clipsFolder: 'Clips',
 	aiNotesFolder: '',
 	handwritingFolder: 'Handwritten Notes',
@@ -58,13 +58,13 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName('Transcript server URL')
-			.setDesc('Base URL of the local YouTube transcript server (transcript_server.py).')
+			.setName('Vizier server URL')
+			.setDesc('Base URL of the local Vizier server (vizier_server.py). Provides YouTube transcripts and handwriting OCR.')
 			.addText(text => text
 				.setPlaceholder('http://127.0.0.1:11435')
-				.setValue(this.plugin.settings.transcriptServerUrl)
+				.setValue(this.plugin.settings.serverUrl)
 				.onChange(async (value) => {
-					this.plugin.settings.transcriptServerUrl = value.trim() || DEFAULT_SETTINGS.transcriptServerUrl;
+					this.plugin.settings.serverUrl = value.trim() || DEFAULT_SETTINGS.serverUrl;
 					await this.plugin.saveSettings();
 				}));
 

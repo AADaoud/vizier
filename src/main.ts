@@ -107,7 +107,7 @@ export default class VizierPlugin extends Plugin {
 				addMessage('assistant', 'Generating note…');
 				const config: CommandConfig = {
 					ollamaUrl: this.settings.ollamaUrl,
-					transcriptServerUrl: this.settings.transcriptServerUrl,
+					serverUrl: this.settings.serverUrl,
 				};
 				await executeWrite(topic, this.app, replaceMessage, this.settings.defaultModel, config, this.settings.aiNotesFolder);
 			},
@@ -133,7 +133,7 @@ export default class VizierPlugin extends Plugin {
 				addMessage('assistant', `Clipping ${url}…`);
 				const config: CommandConfig = {
 					ollamaUrl: this.settings.ollamaUrl,
-					transcriptServerUrl: this.settings.transcriptServerUrl,
+					serverUrl: this.settings.serverUrl,
 				};
 				await executeClip(url, this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings.clipsFolder);
 			},
@@ -161,7 +161,7 @@ export default class VizierPlugin extends Plugin {
 					const { addMessage } = noticeCallbacks();
 					const config: CommandConfig = {
 						ollamaUrl: this.settings.ollamaUrl,
-						transcriptServerUrl: this.settings.transcriptServerUrl,
+						serverUrl: this.settings.serverUrl,
 					};
 					void executeRead('', this.app, addMessage, this.settings.defaultModel, config);
 				}
@@ -193,7 +193,7 @@ export default class VizierPlugin extends Plugin {
 						new Notice('Generating abstract…');
 						const config: CommandConfig = {
 							ollamaUrl: this.settings.ollamaUrl,
-							transcriptServerUrl: this.settings.transcriptServerUrl,
+							serverUrl: this.settings.serverUrl,
 						};
 
 						try {
@@ -221,31 +221,31 @@ export default class VizierPlugin extends Plugin {
 			},
 		});
 
-		// ── Setup transcript server ────────────────────────────────────
+		// ── Setup Vizier server ────────────────────────────────────────
 		this.addCommand({
 			id: 'ai-setup-transcript-server',
-			name: 'Setup / start transcript server',
+			name: 'Setup / start Vizier server',
 			callback: () => {
-				new ServerSetupModal(this.app, this.serverManager, () => {
-					new Notice('Transcript server is running.');
+				new ServerSetupModal(this.app, this.serverManager, this.settings.serverUrl, () => {
+					new Notice('Vizier server is running.');
 				}).open();
 			},
 		});
 
-		// ── Stop transcript server ─────────────────────────────────────
+		// ── Stop Vizier server ─────────────────────────────────────────
 		this.addCommand({
 			id: 'ai-stop-transcript-server',
-			name: 'Stop transcript server',
+			name: 'Stop Vizier server',
 			callback: () => {
 				if (this.serverManager.isRunning) {
 					this.serverManager.stopServer();
-					new Notice('Transcript server stopped.');
+					new Notice('Vizier server stopped.');
 				} else {
-					void this.serverManager.isServerReachable(this.settings.transcriptServerUrl).then(reachable => {
+					void this.serverManager.isServerReachable(this.settings.serverUrl).then(reachable => {
 						if (reachable) {
-							new Notice('Transcript server is running from a previous session — restart Obsidian or kill the Python process manually.');
+							new Notice('Vizier server is running from a previous session — restart Obsidian or kill the Python process manually.');
 						} else {
-							new Notice('Transcript server is not running.');
+							new Notice('Vizier server is not running.');
 						}
 					});
 				}

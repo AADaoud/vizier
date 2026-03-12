@@ -342,7 +342,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		const parsed = parseCommand(text);
 		const config: CommandConfig = {
 			ollamaUrl: settings.ollamaUrl,
-			transcriptServerUrl: settings.transcriptServerUrl,
+			serverUrl: settings.serverUrl,
 		};
 
 		if (parsed) {

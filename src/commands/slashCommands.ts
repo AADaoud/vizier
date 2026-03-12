@@ -13,7 +13,7 @@ export interface SlashCommand {
 
 export interface CommandConfig {
 	ollamaUrl: string;
-	transcriptServerUrl: string;
+	serverUrl: string;
 }
 
 export type AddMessage = (role: 'user' | 'assistant', content: string) => void;
@@ -130,7 +130,7 @@ async function fetchAndSummarizeYouTube(url: string, model: string, config: Comm
 	let response: Awaited<ReturnType<typeof requestUrl>>;
 	try {
 		response = await requestUrl({
-			url: `${config.transcriptServerUrl}/transcript?video_id=${encodeURIComponent(videoId)}`,
+			url: `${config.serverUrl}/transcript?video_id=${encodeURIComponent(videoId)}`,
 			throw: false,
 		});
 	} catch {
@@ -395,7 +395,7 @@ export async function executeSummarize(
 		if (isYouTube && msg.includes('TRANSCRIPT_SERVER_UNREACHABLE')) {
 			replaceMessage(
 				'assistant',
-				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
+				'Could not reach the Vizier server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start Vizier server"** to install dependencies and start it automatically.'
 			);
 		} else {
 			replaceMessage('assistant', `Failed to summarize: ${msg}`);
@@ -455,7 +455,7 @@ export async function executeClip(
 		if (isYouTube && msg.includes('TRANSCRIPT_SERVER_UNREACHABLE')) {
 			replaceMessage(
 				'assistant',
-				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
+				'Could not reach the Vizier server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start Vizier server"** to install dependencies and start it automatically.'
 			);
 		} else {
 			replaceMessage('assistant', `Failed to fetch: ${msg}`);
@@ -538,7 +538,7 @@ export async function executeClipLearn(
 		if (isYouTube && msg.includes('TRANSCRIPT_SERVER_UNREACHABLE')) {
 			replaceMessage(
 				'assistant',
-				'Could not reach the transcript server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start transcript server"** to install dependencies and start it automatically.'
+				'Could not reach the Vizier server.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start Vizier server"** to install dependencies and start it automatically.'
 			);
 		} else {
 			replaceMessage('assistant', `Failed to fetch: ${msg}`);
@@ -696,22 +696,6 @@ export async function executeRead(
 
 // --- /handwriting ---
 
-interface HandwritingOCRResult {
-	legible: boolean;
-	is_note: boolean;
-	transcription: string;
-}
-
-const HANDWRITING_SCHEMA = {
-	type: 'object' as const,
-	properties: {
-		legible: { type: 'boolean' },
-		is_note: { type: 'boolean' },
-		transcription: { type: 'string' },
-	},
-	required: ['legible', 'is_note', 'transcription'],
-};
-
 function getAttachmentFolder(app: App): string {
 	try {
 		const cfg = (app.vault as unknown as { getConfig: (key: string) => string }).getConfig('attachmentFolderPath');
@@ -728,7 +712,7 @@ export async function executeHandwriting(
 	config: CommandConfig,
 	notesFolder: string,
 ): Promise<void> {
-	// 1. Read image as base64 for Ollama
+	// 1. Read image as base64
 	replaceMessage('assistant', 'Reading image…');
 	const buffer = await imageFile.arrayBuffer();
 	const uint8 = new Uint8Array(buffer);
@@ -736,37 +720,68 @@ export async function executeHandwriting(
 	for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i] ?? 0);
 	const base64 = btoa(binary);
 
-	// 2. Run OCR via vision model
+	// 2. Run OCR via dedicated server
 	replaceMessage('assistant', 'Transcribing handwriting…');
-	let ocrResult: HandwritingOCRResult;
+	let transcriptionText = '';
+
+	let ocrRes: Awaited<ReturnType<typeof requestUrl>>;
 	try {
-		ocrResult = await callOllamaStructured<HandwritingOCRResult>({
+		ocrRes = await requestUrl({
+			url: `${config.serverUrl}/ocr`,
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ image: base64 }),
+			throw: false,
+		});
+	} catch {
+		ocrRes = { status: 0 } as never;
+	}
+
+	if (ocrRes.status === 0) {
+		replaceMessage('assistant',
+			'The Vizier server is not running.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start Vizier server"** to install dependencies and start it automatically.');
+		return;
+	}
+
+	if (ocrRes.status === 503) {
+		const errData = ocrRes.json as { error?: string };
+		replaceMessage('assistant',
+			`OCR dependencies not installed.\n\n${errData.error ?? ''}\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start Vizier server"** to install them.`);
+		return;
+	}
+
+	if (ocrRes.status !== 200) {
+		const errData = ocrRes.json as { error?: string };
+		replaceMessage('assistant', `OCR server error: ${errData.error ?? `HTTP ${ocrRes.status}`}`);
+		return;
+	}
+
+	const ocrData = ocrRes.json as { text: string };
+	transcriptionText = ocrData.text ?? '';
+
+	if (!transcriptionText.trim()) {
+		replaceMessage('assistant', 'OCR returned no text. Check the image is clear and contains handwriting.');
+		return;
+	}
+
+	// 3. Ollama cleanup pass (non-fatal)
+	try {
+		replaceMessage('assistant', 'Cleaning up OCR text…');
+		transcriptionText = await callOllama({
 			ollamaUrl: config.ollamaUrl,
 			model,
-			messages: [{ role: 'user', content: Prompts.handwritingOCR(), images: [base64] }],
-			format: HANDWRITING_SCHEMA,
+			messages: [{ role: 'user', content: Prompts.handwritingCleanup(transcriptionText) }],
 		});
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		replaceMessage('assistant', `OCR failed: ${msg}`);
+	} catch {
+		// cleanup failed — use raw OCR text
+	}
+
+	if (!transcriptionText.trim()) {
+		replaceMessage('assistant', 'OCR returned no text. Check the image is clear and contains handwriting.');
 		return;
 	}
 
-	if (!ocrResult.legible || !ocrResult.is_note) {
-		replaceMessage('assistant', !ocrResult.legible
-			? 'Image is not legible enough to transcribe. Make sure it is in focus and well-lit.'
-			: 'Image does not appear to be a handwritten note.');
-		return;
-	}
-
-	if (!ocrResult.transcription.trim()) {
-		replaceMessage('assistant',
-			`The model returned no transcription text. Make sure you are using a vision-capable model (e.g. \`llava\`, \`minicpm-v\`, \`gemma3:12b\`). The current model is \`${model}\`.`
-		);
-		return;
-	}
-
-	// 3. Save image to vault attachment folder
+	// 4. Save image to vault attachment folder
 	replaceMessage('assistant', 'Saving image…');
 	const attachmentFolder = getAttachmentFolder(app);
 	const timestamp = Date.now();
@@ -784,11 +799,11 @@ export async function executeHandwriting(
 		return;
 	}
 
-	// 4. Create note with embedded image and transcription callout
+	// 5. Create note with embedded image and transcription callout
 	replaceMessage('assistant', 'Creating note…');
 	const date = new Date().toISOString().slice(0, 10);
 	const noteBaseName = `${date} - Handwritten Note`;
-	const transcriptionLines = ocrResult.transcription.split('\n').map(l => `> ${l}`).join('\n');
+	const transcriptionLines = transcriptionText.split('\n').map(l => `> ${l}`).join('\n');
 	const noteContent = `---\ndate: ${date}\ntags:\n  - handwriting\n---\n\n![[${imgFilename}]]\n\n> [!note] Transcription\n${transcriptionLines}\n`;
 
 	const baseNotePath = `${notesFolder}/${noteBaseName}.md`;

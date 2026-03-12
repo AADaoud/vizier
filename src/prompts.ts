@@ -142,6 +142,10 @@ export const Prompts = {
 		`If the image is not legible or not a handwritten note, set transcription to "".\n` +
 		`Do NOT add commentary. Output only the JSON fields.`,
 
+	// ── Handwriting OCR: cleanup pass ────────────────────────────────────────
+	handwritingCleanup: (raw: string) =>
+		`You are an OCR post-processor. Fix spacing, punctuation, and word splits in this raw OCR output from a handwritten note. Preserve all content and line breaks. Return only the corrected text, no commentary.\n\nRaw OCR:\n${raw}`,
+
 	// ── Read: summarize a note ─────────────────────────────────────────────
 	readSummarize: (basename: string, content: string) =>
 		`You are a summarization system. Output ONLY the summary.\n\n` +

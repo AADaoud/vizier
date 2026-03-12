@@ -25,10 +25,10 @@ export class TranscriptServerManager {
 	}
 
 	/** Check if the server is reachable at the given URL. */
-	async isServerReachable(transcriptServerUrl: string): Promise<boolean> {
+	async isServerReachable(serverUrl: string): Promise<boolean> {
 		try {
 			const res = await requestUrl({
-				url: `${transcriptServerUrl}/transcript?video_id=test`,
+				url: `${serverUrl}/health`,
 				throw: false,
 			});
 			// Any response (even 500) means the server is up
@@ -41,7 +41,7 @@ export class TranscriptServerManager {
 	/** Start the server using a venv inside the plugin directory. */
 	startServer(): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const script = path.join(this.pluginDir, 'transcript_server.py');
+			const script = path.join(this.pluginDir, 'vizier_server.py');
 			const venvPython = path.join(this.pluginDir, '.venv', 'bin', 'python3');
 			this.process = spawnProc(venvPython, [script], {
 				cwd: this.pluginDir,
@@ -53,7 +53,7 @@ export class TranscriptServerManager {
 			});
 
 			this.process.stderr?.on('data', (data: { toString(): string }) => {
-				logger.error('transcript_server stderr:', data.toString());
+				logger.error('vizier_server stderr:', data.toString());
 			});
 
 			this.process.on('error', (err) => {
@@ -82,25 +82,28 @@ export class TranscriptServerManager {
 }
 
 /**
- * Modal shown when the transcript server isn't running.
- * Offers one-click setup (create venv, install deps) and start.
+ * Modal shown when the server isn't running.
+ * Auto-detects whether setup is needed: if the venv already exists,
+ * it just starts; otherwise it runs setup first.
  */
 export class ServerSetupModal extends Modal {
 	private manager: TranscriptServerManager;
+	private serverUrl: string;
 	private onStarted: () => void;
 
-	constructor(app: App, manager: TranscriptServerManager, onStarted: () => void) {
+	constructor(app: App, manager: TranscriptServerManager, serverUrl: string, onStarted: () => void) {
 		super(app);
 		this.manager = manager;
+		this.serverUrl = serverUrl;
 		this.onStarted = onStarted;
 	}
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl('h2', { text: 'YouTube transcript server' });
+		contentEl.createEl('h2', { text: 'Vizier server' });
 		contentEl.createEl('p', {
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			text: 'A small local Python server is required to fetch YouTube transcripts. Click "Setup & start" to automatically create a virtual environment, install dependencies, and launch the server.',
+			text: 'A small local Python server is required for YouTube transcripts and handwriting OCR. Click "Start" to set up and launch it automatically.',
 		});
 
 		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
@@ -112,86 +115,88 @@ export class ServerSetupModal extends Modal {
 		};
 
 		const btnRow = contentEl.createDiv({ cls: 'modal-button-container' });
-
-		const setupBtn = btnRow.createEl('button', { text: 'Setup & start', cls: 'mod-cta' });
-		const startBtn = btnRow.createEl('button', { text: 'Start only' });
+		const startBtn = btnRow.createEl('button', { text: 'Start', cls: 'mod-cta' });
 		const cancelBtn = btnRow.createEl('button', { text: 'Cancel' });
 
 		cancelBtn.onclick = () => this.close();
 
 		startBtn.onclick = async () => {
-			setupBtn.disabled = true;
 			startBtn.disabled = true;
-			log('Starting server…');
-			try {
-				await this.manager.startServer();
-				log('Server started successfully.');
-				new Notice('Transcript server started.');
-				this.onStarted();
-				this.close();
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				log(`Error: ${msg}`);
-				setupBtn.disabled = false;
-				startBtn.disabled = false;
-			}
-		};
-
-		setupBtn.onclick = async () => {
-			setupBtn.disabled = true;
-			startBtn.disabled = true;
-			log('Detecting Python…');
+			cancelBtn.disabled = true;
 
 			const pluginDir = (this.manager as unknown as { pluginDir: string }).pluginDir;
 
-			// Step 1: find python3
-			const python = await this.findPython(log);
-			if (!python) {
-				log('Python 3 not found. Please install Python 3.8+ and try again.');
-				setupBtn.disabled = false;
-				startBtn.disabled = false;
-				return;
+			// Auto-detect whether setup is needed
+			const alreadySetup = await this.isSetupDone(pluginDir);
+			if (!alreadySetup) {
+				log('Detecting Python…');
+				const python = await this.findPython(log);
+				if (!python) {
+					log('Python 3 not found. Please install Python 3.8+ and try again.');
+					startBtn.disabled = false;
+					cancelBtn.disabled = false;
+					return;
+				}
+
+				log(`Using: ${python}`);
+				log('Creating virtual environment (.venv)…');
+				const venvOk = await this.runCmd(python, ['-m', 'venv', '.venv'], pluginDir, log);
+				if (!venvOk) {
+					startBtn.disabled = false;
+					cancelBtn.disabled = false;
+					return;
+				}
+
+				const pip = path.join(pluginDir, '.venv', 'bin', 'pip3');
+				log('Installing dependencies…');
+				const pipOk = await this.runCmd(pip, ['install', 'youtube-transcript-api', 'easyocr', 'pillow'], pluginDir, log);
+				if (!pipOk) {
+					startBtn.disabled = false;
+					cancelBtn.disabled = false;
+					return;
+				}
 			}
 
-			// Step 2: create venv
-			log(`Using: ${python}`);
-			log('Creating virtual environment (.venv)…');
-			const venvOk = await this.runCmd(python, ['-m', 'venv', '.venv'], pluginDir, log);
-			if (!venvOk) {
-				setupBtn.disabled = false;
-				startBtn.disabled = false;
-				return;
-			}
-
-			// Step 3: install dependency
-			const pip = path.join(pluginDir, '.venv', 'bin', 'pip3');
-			log('Installing youtube-transcript-api…');
-			const pipOk = await this.runCmd(pip, ['install', 'youtube-transcript-api'], pluginDir, log);
-			if (!pipOk) {
-				setupBtn.disabled = false;
-				startBtn.disabled = false;
-				return;
-			}
-
-			// Step 4: start
 			log('Starting server…');
 			try {
 				await this.manager.startServer();
-				log('Done! Server is running.');
-				new Notice('Transcript server set up and started.');
+				log('Server started.');
+				new Notice('Vizier server started.');
 				this.onStarted();
 				this.close();
+				void this.checkModelsAndPrompt();
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				log(`Error: ${msg}`);
-				setupBtn.disabled = false;
 				startBtn.disabled = false;
+				cancelBtn.disabled = false;
 			}
 		};
 	}
 
 	onClose(): void {
 		this.contentEl.empty();
+	}
+
+	private async checkModelsAndPrompt(): Promise<void> {
+		try {
+			const res = await requestUrl({ url: `${this.serverUrl}/models/status`, throw: false });
+			if (res.status === 200) {
+				const data = res.json as { cached?: boolean };
+				if (!data.cached) {
+					new ModelDownloadModal(this.app, this.serverUrl).open();
+				}
+			}
+		} catch { /* ignore */ }
+	}
+
+	private isSetupDone(pluginDir: string): Promise<boolean> {
+		return new Promise(resolve => {
+			const venvPython = path.join(pluginDir, '.venv', 'bin', 'python3');
+			const proc = spawnProc(venvPython, ['--version']);
+			proc.on('close', (code: number) => resolve(code === 0));
+			proc.on('error', () => resolve(false));
+		});
 	}
 
 	private findPython(log: (m: string) => void): Promise<string | null> {
@@ -227,5 +232,97 @@ export class ServerSetupModal extends Modal {
 				resolve(false);
 			});
 		});
+	}
+}
+
+/**
+ * Modal shown after server start when OCR models haven't been downloaded yet.
+ * Offers to download ~250 MB of EasyOCR model files in the background,
+ * with a spinner and polling until the download completes.
+ */
+export class ModelDownloadModal extends Modal {
+	private serverUrl: string;
+	private pollInterval: ReturnType<typeof setInterval> | null = null;
+	private pollCount = 0;
+	private readonly MAX_POLLS = 60; // 5 minutes at 5 s intervals
+
+	constructor(app: App, serverUrl: string) {
+		super(app);
+		this.serverUrl = serverUrl;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl('h2', { text: 'OCR model download' });
+		contentEl.createEl('p', {
+			text: 'Handwriting OCR requires model files (~250 MB) that will be downloaded once and cached locally. This only happens on first use.',
+		});
+
+		const spinner = contentEl.createDiv({ cls: 'vizier-spinner' });
+		spinner.style.display = 'none';
+
+		const statusEl = contentEl.createEl('p', { cls: 'vizier-model-status' });
+		statusEl.style.display = 'none';
+
+		const btnRow = contentEl.createDiv({ cls: 'modal-button-container' });
+		const downloadBtn = btnRow.createEl('button', { text: 'Download now', cls: 'mod-cta' });
+		const skipBtn = btnRow.createEl('button', { text: 'Not now' });
+
+		skipBtn.onclick = () => this.close();
+
+		downloadBtn.onclick = async () => {
+			downloadBtn.disabled = true;
+			skipBtn.disabled = true;
+			spinner.style.display = 'block';
+			statusEl.style.display = 'block';
+			statusEl.textContent = 'Downloading models… this may take several minutes.';
+
+			// Trigger download (non-blocking — server returns 202 immediately)
+			try {
+				await requestUrl({ url: `${this.serverUrl}/models/download`, method: 'POST', throw: false });
+			} catch { /* ignore */ }
+
+			// Poll for completion every 5 s
+			this.pollCount = 0;
+			this.pollInterval = setInterval(
+				() => void this.pollStatus(spinner, statusEl),
+				5000
+			);
+		};
+	}
+
+	private async pollStatus(spinner: HTMLElement, statusEl: HTMLElement): Promise<void> {
+		this.pollCount++;
+		try {
+			const res = await requestUrl({ url: `${this.serverUrl}/models/status`, throw: false });
+			if (res.status === 200) {
+				const data = res.json as { cached?: boolean };
+				if (data.cached) {
+					this.stopPolling();
+					spinner.style.display = 'none';
+					statusEl.textContent = 'Models downloaded and ready.';
+					setTimeout(() => this.close(), 1500);
+					return;
+				}
+			}
+		} catch { /* ignore */ }
+
+		if (this.pollCount >= this.MAX_POLLS) {
+			this.stopPolling();
+			spinner.style.display = 'none';
+			statusEl.textContent = 'Download timed out. Models will download automatically on first use.';
+		}
+	}
+
+	private stopPolling(): void {
+		if (this.pollInterval !== null) {
+			clearInterval(this.pollInterval);
+			this.pollInterval = null;
+		}
+	}
+
+	onClose(): void {
+		this.stopPolling();
+		this.contentEl.empty();
 	}
 }
