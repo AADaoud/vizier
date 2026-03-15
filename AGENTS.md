@@ -12,16 +12,16 @@
 | Feature | Entry point |
 |---|---|
 | Chat UI | `src/ui/ChatView.tsx` → `src/ui/ChatApp.tsx` |
-| Slash commands (`/write`, `/find`, `/clip`, `/summarize`, `/read`) | `src/commands/slashCommands.ts` |
+| Slash commands (`/write`, `/find`, `/clip`, `/clip long`, `/clip learn`, `/summarize`, `/read`, `/handwriting`) | `src/commands/slashCommands.ts` |
 | Settings | `src/settings.ts` |
-| Transcript server auto-setup modal | `src/ui/ServerSetupModal.ts` |
+| Vizier server setup modal + model download modal | `src/ui/ServerSetupModal.ts` |
 | AI prompts | `src/prompts.ts` |
 | Ollama API wrapper | `src/utils/ollama.ts` |
 | Map-reduce summarizer | `src/utils/chunking.ts` |
 
 **External services used:**
 - `r.jina.ai` — article fetching (converts any URL to clean markdown; free, no auth)
-- `transcript_server.py` — local Python HTTP server for YouTube transcripts (port 11435)
+- `vizier_server.py` — local Python HTTP server; provides YouTube transcripts (`/transcript`) and handwriting OCR (`/ocr`) on port 11435. Each route loads its dependencies lazily so a missing package only breaks that route, not the whole server.
 
 ## Chat history
 
@@ -39,7 +39,7 @@ Persisted in `localStorage` under key `vizier-chat-history` (last 60 messages). 
 ### Install
 
 ```bash
-npm install
+npm install --legacy-peer-deps
 ```
 
 ### Dev (watch)
@@ -56,10 +56,11 @@ npm run build
 
 ## Linting
 
-- To use eslint install eslint from terminal: `npm install -g eslint`
-- To use eslint to analyze this project use this command: `eslint main.ts`
-- eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder: `eslint ./src/`
+```bash
+npm run lint        # run eslint across all source files
+```
+
+The project uses `eslint-plugin-obsidianmd` which enforces Obsidian-specific rules (sentence-case UI text, no inline `style.display` assignments, no plugin name in command names). Fix all errors before submitting a PR. Use `// eslint-disable-next-line <rule>` only when a rule fires on a legitimate exception (e.g. a proper noun the linter misreads as a casing violation).
 
 ## File & folder conventions
 
