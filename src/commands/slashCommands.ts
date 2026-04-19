@@ -31,8 +31,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 	{
 		id: 'write',
 		label: '/write',
-		description: 'Write content to a new or existing note',
+		description: 'Create a new AI-generated note',
 		template: '/write ',
+	},
+	{
+		id: 'edit',
+		label: '/edit',
+		description: 'Edit the active note with an AI instruction',
+		template: '/edit ',
 	},
 	{
 		id: 'find',
@@ -75,6 +81,30 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		label: '/handwriting',
 		description: 'Paste a handwritten note image — transcribes and saves with AI',
 		template: '/handwriting',
+	},
+	{
+		id: 'person',
+		label: '/person',
+		description: 'Create a person note — searches Wikipedia or manual entry',
+		template: '/person ',
+	},
+	{
+		id: 'event',
+		label: '/event',
+		description: 'Create a historical event note — searches Wikipedia or manual entry',
+		template: '/event ',
+	},
+	{
+		id: 'idea',
+		label: '/idea',
+		description: 'Create a geopolitical concept or theory note',
+		template: '/idea ',
+	},
+	{
+		id: 'link',
+		label: '/link',
+		description: 'Add a bidirectional link between two entity notes — e.g. /link Person | Event',
+		template: '/link ',
 	},
 ];
 
@@ -215,6 +245,7 @@ export async function executeWrite(
 	args: string,
 	app: App,
 	addMessage: AddMessage,
+	replaceMessage: ReplaceMessage,
 	model: string,
 	config: CommandConfig,
 	aiNotesFolder = ''
@@ -224,6 +255,8 @@ export async function executeWrite(
 		addMessage('assistant', 'Usage: `/write <topic description>`\n\nExample: `/write A note about quantum computing`');
 		return;
 	}
+
+	addMessage('assistant', 'Generating note…');
 
 	let result: NoteStructure;
 	try {
@@ -235,7 +268,7 @@ export async function executeWrite(
 		});
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		addMessage('assistant', `Failed to generate note: ${msg}`);
+		replaceMessage('assistant', `Failed to generate note: ${msg}`);
 		return;
 	}
 
@@ -251,23 +284,63 @@ export async function executeWrite(
 		folderPath = app.fileManager.getNewFileParent('').path;
 	}
 	const prefix = folderPath === '/' || folderPath === '' ? '' : `${folderPath}/`;
-	const filePath = `${prefix}${sanitized}.md`;
 
-	const yamlTags = buildYamlTags(result.tags);
+	// Always create a new file — find an unused name if needed
+	let filePath = `${prefix}${sanitized}.md`;
+	for (let i = 2; i <= 10; i++) {
+		if (!app.vault.getAbstractFileByPath(filePath)) break;
+		filePath = `${prefix}${sanitized}-${i}.md`;
+	}
+
+	const tags = [...(result.tags ?? []), 'ai'].map(sanitizeTag).filter(t => t.length > 0);
+	const yamlTags = buildYamlTags(tags);
 	const fileContent = `---\ntags:\n${yamlTags}\n---\n\n${result.body}`;
 
+	replaceMessage('assistant', 'Writing to file…');
 	try {
-		const existing = app.vault.getAbstractFileByPath(filePath);
-		if (existing instanceof TFile) {
-			await app.vault.modify(existing, fileContent);
-			addMessage('assistant', `Updated **[[${sanitized}]]** at \`${filePath}\`.`);
-		} else {
-			await app.vault.create(filePath, fileContent);
-			addMessage('assistant', `Created **[[${sanitized}]]** at \`${filePath}\`.`);
-		}
+		await app.vault.create(filePath, fileContent);
+		const displayName = filePath.replace(/^.*\//, '').replace(/\.md$/, '');
+		replaceMessage('assistant', `Created **[[${displayName}]]** at \`${filePath}\`.`);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		addMessage('assistant', `Failed to write note: ${msg}`);
+		replaceMessage('assistant', `Failed to write note: ${msg}`);
+	}
+}
+
+// --- /edit ---
+
+export async function executeEdit(
+	args: string,
+	app: App,
+	addMessage: AddMessage,
+	replaceMessage: ReplaceMessage,
+	model: string,
+	config: CommandConfig
+): Promise<void> {
+	const instruction = args.trim();
+	if (!instruction) {
+		addMessage('assistant', 'Usage: `/edit <instruction>`\n\nExample: `/edit make it more concise`');
+		return;
+	}
+	const file = app.workspace.getActiveFile();
+	if (!file) {
+		addMessage('assistant', 'No active note. Open a note first, then run `/edit`.');
+		return;
+	}
+	const content = await app.vault.cachedRead(file);
+	addMessage('assistant', `Editing **${file.basename}**…`);
+	try {
+		const edited = await callOllama({
+			ollamaUrl: config.ollamaUrl,
+			model,
+			messages: [{ role: 'user', content: Prompts.editNote(instruction, content) }],
+		});
+		replaceMessage('assistant', 'Writing changes…');
+		await app.vault.modify(file, edited);
+		replaceMessage('assistant', `Updated **[[${file.basename}]]**.`);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		replaceMessage('assistant', `Failed to edit note: ${msg}`);
 	}
 }
 
@@ -296,6 +369,7 @@ export async function executeFind(
 	args: string,
 	app: App,
 	addMessage: AddMessage,
+	replaceMessage: ReplaceMessage,
 	addFindResults: AddFindResults,
 	model: string,
 	config: CommandConfig
@@ -305,6 +379,8 @@ export async function executeFind(
 		addMessage('assistant', 'Usage: `/find <query>`\n\nExample: `/find machine learning neural networks`');
 		return;
 	}
+
+	addMessage('assistant', 'Searching…');
 
 	// Direct terms from query words (always included)
 	const directTerms = queryToTerms(query);
@@ -349,7 +425,7 @@ export async function executeFind(
 	}
 
 	if (matchMap.size === 0) {
-		addMessage('assistant', `No notes found for **"${query}"**.`);
+		replaceMessage('assistant', `No notes found for **"${query}"**.`);
 		return;
 	}
 
@@ -663,6 +739,7 @@ export async function executeRead(
 	args: string,
 	app: App,
 	addMessage: AddMessage,
+	replaceMessage: ReplaceMessage,
 	model: string,
 	config: CommandConfig
 ): Promise<void> {
@@ -682,7 +759,7 @@ export async function executeRead(
 	if (!question) {
 		addMessage('assistant', `Summarizing **${file.basename}**…`);
 		const summary = await mapReduceSummarize(content, model, `note "${file.basename}"`, config.ollamaUrl);
-		addMessage('assistant', summary);
+		replaceMessage('assistant', summary);
 	} else {
 		addMessage('assistant', `Reading **${file.basename}**…`);
 		const answer = await callOllama({
@@ -690,7 +767,7 @@ export async function executeRead(
 			model,
 			messages: [{ role: 'user', content: Prompts.readQuestion(question, content) }],
 		});
-		addMessage('assistant', answer);
+		replaceMessage('assistant', answer);
 	}
 }
 

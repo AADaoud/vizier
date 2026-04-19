@@ -1,59 +1,11 @@
-import { App, Modal, Notice, Plugin } from 'obsidian';
+import { App, Notice, Plugin } from 'obsidian';
 import { AIAgentSettings, DEFAULT_SETTINGS, AIAgentSettingTab } from './settings';
 import { ChatView, VIEW_TYPE_AI_CHAT } from './ui/ChatView';
 import { TranscriptServerManager, ServerSetupModal } from './ui/ServerSetupModal';
-import { executeWrite, executeClip, executeRead, CommandConfig, AddMessage } from './commands/slashCommands';
+import { executeWrite, executeEdit, executeClip, executeRead, CommandConfig, AddMessage } from './commands/slashCommands';
+import { executeCreatePerson, executeCreateEvent, executeCreateIdea, executeLink } from './commands/humanNetworkCommands';
+import { promptModal } from './ui/PromptModal';
 import { mapReduceSummarize } from './utils/chunking';
-
-// ── Simple text-input modal ────────────────────────────────────────────────
-
-class PromptModal extends Modal {
-	private title: string;
-	private placeholder: string;
-	private resolve: (value: string | null) => void;
-
-	constructor(app: App, title: string, placeholder: string, resolve: (value: string | null) => void) {
-		super(app);
-		this.title = title;
-		this.placeholder = placeholder;
-		this.resolve = resolve;
-	}
-
-	onOpen(): void {
-		const { contentEl } = this;
-		contentEl.createEl('h3', { text: this.title });
-
-		const input = contentEl.createEl('input', { type: 'text', cls: 'ai-prompt-modal-input' });
-		input.placeholder = this.placeholder;
-
-		const submit = () => {
-			const val = input.value.trim();
-			this.resolve(val || null);
-			this.close();
-		};
-
-		input.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter') submit();
-			if (e.key === 'Escape') { this.resolve(null); this.close(); }
-		});
-
-		const btnRow = contentEl.createDiv({ cls: 'ai-prompt-modal-buttons' });
-		const ok = btnRow.createEl('button', { text: 'OK', cls: 'mod-cta' });
-		ok.onclick = submit;
-		const cancel = btnRow.createEl('button', { text: 'Cancel' });
-		cancel.onclick = () => { this.resolve(null); this.close(); };
-
-		setTimeout(() => input.focus(), 50);
-	}
-
-	onClose(): void {
-		this.contentEl.empty();
-	}
-}
-
-function promptModal(app: App, title: string, placeholder: string): Promise<string | null> {
-	return new Promise((resolve) => new PromptModal(app, title, placeholder, resolve).open());
-}
 
 // ── Notice-based message helpers ───────────────────────────────────────────
 
@@ -104,12 +56,11 @@ export default class VizierPlugin extends Plugin {
 				const topic = await promptModal(this.app, 'Write note with AI', 'Describe the note topic…');
 				if (!topic) return;
 				const { addMessage, replaceMessage } = noticeCallbacks();
-				addMessage('assistant', 'Generating note…');
 				const config: CommandConfig = {
 					ollamaUrl: this.settings.ollamaUrl,
 					serverUrl: this.settings.serverUrl,
 				};
-				await executeWrite(topic, this.app, replaceMessage, this.settings.defaultModel, config, this.settings.aiNotesFolder);
+				await executeWrite(topic, this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings.aiNotesFolder);
 			},
 		});
 
@@ -158,12 +109,12 @@ export default class VizierPlugin extends Plugin {
 				const file = this.app.workspace.getActiveFile();
 				if (!file) return false;
 				if (!checking) {
-					const { addMessage } = noticeCallbacks();
+					const { addMessage, replaceMessage } = noticeCallbacks();
 					const config: CommandConfig = {
 						ollamaUrl: this.settings.ollamaUrl,
 						serverUrl: this.settings.serverUrl,
 					};
-					void executeRead('', this.app, addMessage, this.settings.defaultModel, config);
+					void executeRead('', this.app, addMessage, replaceMessage, this.settings.defaultModel, config);
 				}
 				return true;
 			},
@@ -218,6 +169,81 @@ export default class VizierPlugin extends Plugin {
 					})();
 				}
 				return true;
+			},
+		});
+
+		// ── Edit active note with AI ───────────────────────────────────
+		this.addCommand({
+			id: 'ai-edit-note',
+			name: 'Edit active note with AI',
+			editorCheckCallback: (checking) => {
+				if (!this.app.workspace.getActiveFile()) return false;
+				if (!checking) {
+					void (async () => {
+						const instruction = await promptModal(this.app, 'Edit note with AI', 'Describe how to edit this note…');
+						if (!instruction) return;
+						const { addMessage, replaceMessage } = noticeCallbacks();
+						const config: CommandConfig = {
+							ollamaUrl: this.settings.ollamaUrl,
+							serverUrl: this.settings.serverUrl,
+						};
+						await executeEdit(instruction, this.app, addMessage, replaceMessage, this.settings.defaultModel, config);
+					})();
+				}
+				return true;
+			},
+		});
+
+		// ── Create person note ─────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-create-person',
+			name: 'Create person note (Human Network)',
+			callback: async () => {
+				const name = await promptModal(this.app, 'Create person note', 'Person name…');
+				if (!name) return;
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+				await executeCreatePerson(name, this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings);
+			},
+		});
+
+		// ── Create event note ──────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-create-event',
+			name: 'Create event note (Human Network)',
+			callback: async () => {
+				const title = await promptModal(this.app, 'Create event note', 'Event title…');
+				if (!title) return;
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+				await executeCreateEvent(title, this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings);
+			},
+		});
+
+		// ── Create idea note ───────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-create-idea',
+			name: 'Create idea/concept note (Human Network)',
+			callback: async () => {
+				const concept = await promptModal(this.app, 'Create idea note', 'Concept name…');
+				if (!concept) return;
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+				await executeCreateIdea(concept, this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings);
+			},
+		});
+
+		// ── Link two entities ──────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-link-entities',
+			name: 'Link two Human Network entities',
+			callback: async () => {
+				const entityA = await promptModal(this.app, 'Link entities — first entity', 'Name of first entity…');
+				if (!entityA) return;
+				const entityB = await promptModal(this.app, 'Link entities — second entity', 'Name of second entity…');
+				if (!entityB) return;
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				await executeLink(`${entityA} | ${entityB}`, this.app, addMessage, replaceMessage);
 			},
 		});
 

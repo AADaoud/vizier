@@ -10,6 +10,7 @@ import {
 	CommandConfig,
 	FindCandidate,
 	executeWrite,
+	executeEdit,
 	executeFind,
 	executeSummarize,
 	executeClip,
@@ -17,6 +18,12 @@ import {
 	executeRead,
 	executeHandwriting,
 } from '../commands/slashCommands';
+import {
+	executeCreatePerson,
+	executeCreateEvent,
+	executeCreateIdea,
+	executeLink,
+} from '../commands/humanNetworkCommands';
 
 const HISTORY_KEY = 'vizier-chat-history';
 const MAX_HISTORY = 60;
@@ -350,13 +357,19 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 
 			if (parsed.id === 'write') {
 				setCommandLoading(true);
-				try { await executeWrite(parsed.args, app, addMessage, model, config, settings.aiNotesFolder); }
+				try { await executeWrite(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.aiNotesFolder); }
+				finally { setCommandLoading(false); }
+				return;
+			}
+			if (parsed.id === 'edit') {
+				setCommandLoading(true);
+				try { await executeEdit(parsed.args, app, addMessage, replaceLastMessage, model, config); }
 				finally { setCommandLoading(false); }
 				return;
 			}
 			if (parsed.id === 'find') {
 				setCommandLoading(true);
-				try { await executeFind(parsed.args, app, addMessage, addFindResults, model, config); }
+				try { await executeFind(parsed.args, app, addMessage, replaceLastMessage, addFindResults, model, config); }
 				finally { setCommandLoading(false); }
 				return;
 			}
@@ -379,7 +392,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 			}
 			if (parsed.id === 'read') {
 				setCommandLoading(true);
-				try { await executeRead(parsed.args, app, addMessage, model, config); }
+				try { await executeRead(parsed.args, app, addMessage, replaceLastMessage, model, config); }
 				finally { setCommandLoading(false); }
 				return;
 			}
@@ -398,7 +411,32 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 				return;
 			}
 
-			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /find, /summarize, /clip, /clip long, /clip learn, /read, /handwriting`);
+			if (parsed.id === 'person') {
+				setCommandLoading(true);
+				try { await executeCreatePerson(parsed.args, app, addMessage, replaceLastMessage, model, config, settings); }
+				finally { setCommandLoading(false); }
+				return;
+			}
+			if (parsed.id === 'event') {
+				setCommandLoading(true);
+				try { await executeCreateEvent(parsed.args, app, addMessage, replaceLastMessage, model, config, settings); }
+				finally { setCommandLoading(false); }
+				return;
+			}
+			if (parsed.id === 'idea') {
+				setCommandLoading(true);
+				try { await executeCreateIdea(parsed.args, app, addMessage, replaceLastMessage, model, config, settings); }
+				finally { setCommandLoading(false); }
+				return;
+			}
+			if (parsed.id === 'link') {
+				setCommandLoading(true);
+				try { await executeLink(parsed.args, app, addMessage, replaceLastMessage); }
+				finally { setCommandLoading(false); }
+				return;
+			}
+
+			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /find, /summarize, /clip, /clip long, /clip learn, /read, /handwriting, /person, /event, /idea, /link`);
 			return;
 		}
 
@@ -511,6 +549,9 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 							<code>/summarize</code>
 							<code>/clip</code>
 							<code>/read</code>
+							<code>/person</code>
+							<code>/event</code>
+							<code>/idea</code>
 						</p>
 					</div>
 				)}

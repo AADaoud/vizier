@@ -154,6 +154,13 @@ export const Prompts = {
 		`NOTE CONTENT:\n${content}\n\n` +
 		`SUMMARY:`,
 
+	// ── Edit: apply an instruction to a note ───────────────────────────────
+	editNote: (instruction: string, content: string) =>
+		`You are a note-editing system. Apply the following instruction to the note content and return the complete updated note.\n` +
+		`Preserve the YAML front matter exactly if present. Return only the note content with no commentary.\n\n` +
+		`Instruction: ${instruction}\n\n` +
+		`Note:\n${content}`,
+
 	// ── Read: answer a question about a note ───────────────────────────────
 	readQuestion: (question: string, content: string) =>
 		`You are a question-answering system. Output ONLY the answer.\n\n` +
@@ -162,4 +169,52 @@ export const Prompts = {
 		`Do NOT summarize the entire note. Do NOT add commentary.\n\n` +
 		`NOTE CONTENT:\n${content}\n\n` +
 		`ANSWER:`,
+
+	// ── Human Network: structure a person from Wikipedia text ─────────────
+	structurePerson: (name: string, extract: string) =>
+		`You are a biographical data extraction system.\n\n` +
+		`Extract structured fields from this Wikipedia text about "${name}".\n\n` +
+		`Rules:\n` +
+		`- born/died: ISO date YYYY-MM-DD or empty string if unknown\n` +
+		`- nationality: array of country names\n` +
+		`- roles: array of roles/occupations (e.g. ["Secretary of State", "National Security Advisor"])\n` +
+		`- bio: 2 paragraph plain-text biography summarizing the key facts\n` +
+		`- related_people: array of "[[Name]]" wikilinks for notable people mentioned\n` +
+		`- related_events: array of "[[Event]]" wikilinks for notable events mentioned\n` +
+		`- related_ideas: array of "[[Concept]]" wikilinks for ideologies or doctrines mentioned\n` +
+		`- tags: 3-5 lowercase hyphenated tags\n` +
+		`- Do NOT invent information not present in the text\n` +
+		`- Keep wikilinks short (first + last name, no titles)\n\n` +
+		`WIKIPEDIA TEXT:\n${extract}\n\nOUTPUT:`,
+
+	// ── Human Network: structure an event from Wikipedia text ─────────────
+	structureEvent: (title: string, extract: string) =>
+		`You are a historical event data extraction system.\n\n` +
+		`Extract structured fields from this Wikipedia text about "${title}".\n\n` +
+		`Rules:\n` +
+		`- date: ISO date YYYY-MM-DD when event started, or empty string if unknown\n` +
+		`- date_end: ISO date YYYY-MM-DD when event ended, or empty string if ongoing/unknown\n` +
+		`- location: city and country where the event primarily occurred\n` +
+		`- participants: array mixing "[[Person]]" wikilinks for notable individuals and plain strings for states/organizations\n` +
+		`- timeline_tags: array of broader historical contexts this belongs to (e.g. ["Cold War", "Middle East", "Nuclear Age"])\n` +
+		`- significance: one of "high", "medium", or "low" based on global historical impact\n` +
+		`- related_events: array of "[[Event]]" wikilinks for events mentioned\n` +
+		`- related_people: array of "[[Name]]" wikilinks for people mentioned\n` +
+		`- tags: 3-5 lowercase hyphenated tags\n` +
+		`- Do NOT invent information not present in the text\n\n` +
+		`WIKIPEDIA TEXT:\n${extract}\n\nOUTPUT:`,
+
+	// ── Human Network: generate an idea/concept note ──────────────────────
+	structureIdea: (concept: string, description: string) =>
+		`You are a geopolitical concept structuring system.\n\n` +
+		`Generate a structured entry for the concept "${concept}".\n\n` +
+		`Rules:\n` +
+		`- title: canonical name for the concept\n` +
+		`- domain: array of applicable domains from [geopolitics, economics, ideology, history, philosophy, strategy, international-relations]\n` +
+		`- proponents: array of "[[Person]]" wikilinks for key thinkers, leaders, or advocates\n` +
+		`- period: time period as a string (e.g. "Cold War era", "19th–20th century", "Modern")\n` +
+		`- related_ideas: array of "[[Concept]]" wikilinks for related theories or movements\n` +
+		`- bio: 2-3 paragraph plain-text explanation of the concept, its origins, and its significance\n` +
+		`- tags: 3-5 lowercase hyphenated tags\n` +
+		`${description ? `User description: ${description}\n\n` : ''}OUTPUT:`,
 };

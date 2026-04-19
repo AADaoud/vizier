@@ -8,6 +8,9 @@ export interface AIAgentSettings {
 	clipsFolder: string;
 	aiNotesFolder: string;
 	handwritingFolder: string;
+	peopleFolder: string;
+	eventsFolder: string;
+	ideasFolder: string;
 }
 
 export const DEFAULT_SETTINGS: AIAgentSettings = {
@@ -17,6 +20,9 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	clipsFolder: 'Clips',
 	aiNotesFolder: '',
 	handwritingFolder: 'Handwritten Notes',
+	peopleFolder: 'Human Network/People',
+	eventsFolder: 'Human Network/Events',
+	ideasFolder: 'Human Network/Ideas',
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {
@@ -99,6 +105,41 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.handwritingFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.handwritingFolder = value.trim() || DEFAULT_SETTINGS.handwritingFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		containerEl.createEl('h3', { text: 'Human Network' });
+
+		new Setting(containerEl)
+			.setName('People folder')
+			.setDesc('Vault folder where /person saves person notes.')
+			.addText(text => text
+				.setPlaceholder('Human Network/People')
+				.setValue(this.plugin.settings.peopleFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.peopleFolder = value.trim() || DEFAULT_SETTINGS.peopleFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Events folder')
+			.setDesc('Vault folder where /event saves event notes.')
+			.addText(text => text
+				.setPlaceholder('Human Network/Events')
+				.setValue(this.plugin.settings.eventsFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.eventsFolder = value.trim() || DEFAULT_SETTINGS.eventsFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Ideas folder')
+			.setDesc('Vault folder where /idea saves concept notes.')
+			.addText(text => text
+				.setPlaceholder('Human Network/Ideas')
+				.setValue(this.plugin.settings.ideasFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.ideasFolder = value.trim() || DEFAULT_SETTINGS.ideasFolder;
 					await this.plugin.saveSettings();
 				}));
 	}

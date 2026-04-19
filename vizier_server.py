@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Vizier server — YouTube transcripts and handwriting OCR.
+Vizier server — YouTube transcripts, handwriting OCR, and Wikipedia lookup.
 
-Install: pip install youtube-transcript-api easyocr pillow
+Install: pip install youtube-transcript-api easyocr pillow wikipedia-api
 Run:     python3 vizier_server.py
 """
 
@@ -41,6 +41,10 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(200, {'status': 'ok'})
         elif parsed.path == '/models/status':
             self._handle_models_status()
+        elif parsed.path == '/wiki/search':
+            self._handle_wiki_search(parsed)
+        elif parsed.path == '/wiki/page':
+            self._handle_wiki_page(parsed)
         else:
             self._reply(404, {'error': 'not found'})
 
@@ -88,6 +92,78 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(200, {'text': '\n'.join(results)})
         except ImportError:
             self._reply(503, {'error': 'easyocr not installed. Run "Vizier: Setup / start Vizier server" to install dependencies.'})
+        except Exception as e:
+            self._reply(500, {'error': str(e)})
+
+    def _handle_wiki_search(self, parsed) -> None:
+        qs = parse_qs(parsed.query)
+        query = qs.get('q', [None])[0]
+        limit = int(qs.get('limit', ['8'])[0])
+        if not query:
+            self._reply(400, {'error': 'missing q'})
+            return
+        try:
+            import wikipediaapi
+            wiki = wikipediaapi.Wikipedia(
+                user_agent='Vizier-Obsidian-Plugin/1.0',
+                language='en'
+            )
+            results = wiki.search(query, limit=limit)
+            items = []
+            for title, page in results.pages.items():
+                snippet = ''
+                if page.search_meta:
+                    raw = page.search_meta.snippet or ''
+                    # Strip HTML tags from snippet
+                    import re
+                    snippet = re.sub(r'<[^>]+>', '', raw).strip()
+                items.append({'title': title, 'snippet': snippet})
+            self._reply(200, {'results': items})
+        except ImportError:
+            self._reply(503, {'error': 'wikipedia-api not installed. Run: pip install wikipedia-api'})
+        except Exception as e:
+            self._reply(500, {'error': str(e)})
+
+    def _handle_wiki_page(self, parsed) -> None:
+        title = parse_qs(parsed.query).get('title', [None])[0]
+        if not title:
+            self._reply(400, {'error': 'missing title'})
+            return
+        try:
+            import wikipediaapi
+            wiki = wikipediaapi.Wikipedia(
+                user_agent='Vizier-Obsidian-Plugin/1.0',
+                language='en'
+            )
+            page = wiki.page(title)
+            if not page.exists():
+                self._reply(404, {'error': 'page not found'})
+                return
+            # Pick the first JPG/PNG image that looks like a main subject image
+            image_url = ''
+            skip_keywords = {'icon', 'logo', 'flag', 'map', 'seal', 'coat', 'blank', 'commons', 'signature', 'stub'}
+            try:
+                infos = page.images.imageinfo()
+                for img_title, info_list in infos.items():
+                    t = img_title.lower()
+                    if any(k in t for k in skip_keywords):
+                        continue
+                    if not (t.endswith('.jpg') or t.endswith('.jpeg') or t.endswith('.png')):
+                        continue
+                    if info_list and info_list[0].width and info_list[0].width > 100:
+                        image_url = info_list[0].url or ''
+                        break
+            except Exception:
+                pass  # image lookup is best-effort
+            self._reply(200, {
+                'title': page.title,
+                'summary': page.summary,
+                'extract': page.text[:4000],
+                'url': page.fullurl,
+                'image_url': image_url,
+            })
+        except ImportError:
+            self._reply(503, {'error': 'wikipedia-api not installed. Run: pip install wikipedia-api'})
         except Exception as e:
             self._reply(500, {'error': str(e)})
 
