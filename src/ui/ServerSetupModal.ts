@@ -119,11 +119,11 @@ export class ServerSetupModal extends Modal {
 		contentEl.createEl('h2', { text: 'Vizier server' });
 		contentEl.createEl('p', {
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			text: 'A small local Python server is required for YouTube transcripts and handwriting OCR. Click "Start" to set up and launch it automatically.',
+			text: 'A small local Python server is required for YouTube transcripts, Wikipedia lookups (Human Network), and handwriting OCR. Click "Start" to set up and launch it automatically.',
 		});
 
 		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
-		pre.textContent = '';
+		pre.textContent = 'Ready. Click Start to begin.\n';
 
 		const log = (msg: string) => {
 			pre.textContent += msg + '\n';
@@ -141,14 +141,15 @@ export class ServerSetupModal extends Modal {
 			cancelBtn.disabled = true;
 
 			const pluginDir = (this.manager as unknown as { pluginDir: string }).pluginDir;
+			const pip = path.join(pluginDir, '.venv', 'bin', 'pip3');
 
-			// Auto-detect whether setup is needed
+			// Auto-detect whether initial setup is needed
 			const alreadySetup = await this.isSetupDone(pluginDir);
 			if (!alreadySetup) {
 				log('Detecting Python…');
 				const python = await this.findPython(log);
 				if (!python) {
-					log('Python 3 not found. Please install Python 3.8+ and try again.');
+					log('❌ Python 3 not found. Please install Python 3.8+ and try again.');
 					startBtn.disabled = false;
 					cancelBtn.disabled = false;
 					return;
@@ -158,18 +159,26 @@ export class ServerSetupModal extends Modal {
 				log('Creating virtual environment (.venv)…');
 				const venvOk = await runCmd(python, ['-m', 'venv', '.venv'], pluginDir, log);
 				if (!venvOk) {
+					log('❌ Failed to create virtual environment.');
 					startBtn.disabled = false;
 					cancelBtn.disabled = false;
 					return;
 				}
 
-				const pip = path.join(pluginDir, '.venv', 'bin', 'pip3');
-				log('Installing youtube-transcript-api…');
-				const pipOk = await runCmd(pip, ['install', 'youtube-transcript-api'], pluginDir, log);
+				log('Installing core dependencies (youtube-transcript-api, wikipedia-api)…');
+				const pipOk = await runCmd(pip, ['install', 'youtube-transcript-api', 'wikipedia-api'], pluginDir, log);
 				if (!pipOk) {
+					log('❌ Dependency installation failed. Check the log above.');
 					startBtn.disabled = false;
 					cancelBtn.disabled = false;
 					return;
+				}
+			} else {
+				// Venv exists — ensure wikipedia-api is present (may be missing on older installs)
+				log('Checking for wikipedia-api…');
+				const wikiOk = await runCmd(pip, ['install', 'wikipedia-api'], pluginDir, log);
+				if (!wikiOk) {
+					log('⚠ Could not install wikipedia-api — Wikipedia features will be unavailable.');
 				}
 			}
 
@@ -183,7 +192,7 @@ export class ServerSetupModal extends Modal {
 				void this.checkModelsAndPrompt();
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				log(`Error: ${msg}`);
+				log(`❌ ${msg}`);
 				startBtn.disabled = false;
 				cancelBtn.disabled = false;
 			}

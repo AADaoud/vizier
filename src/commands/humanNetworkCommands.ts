@@ -12,6 +12,7 @@ import {
 import { showWikiSearchModal } from '../ui/WikiSearchModal';
 import { promptManualPerson, promptManualEvent } from '../ui/ManualEntryModal';
 import { promptModal } from '../ui/PromptModal';
+import { showImagePickerModal } from '../ui/ImagePickerModal';
 
 // ── Ollama JSON schemas ────────────────────────────────────────────────────
 
@@ -126,6 +127,33 @@ async function downloadImage(app: App, imageUrl: string, attachFolder: string): 
 	return filename;
 }
 
+const SERVER_OFFLINE_MSG =
+	'Vizier server is not running. Use **Vizier: Setup / start Vizier server** from the command palette to start it.';
+const WIKI_API_MISSING_MSG =
+	'`wikipedia-api` is not installed in the Vizier venv. Restart the server — setup will install it automatically.';
+
+type WikiServerStatus = 'ok' | 'offline' | 'no-wiki-api';
+
+async function checkWikiServer(serverUrl: string): Promise<WikiServerStatus> {
+	try {
+		const health = await requestUrl({ url: `${serverUrl}/health`, throw: false });
+		if (health.status === 0) return 'offline';
+	} catch {
+		return 'offline';
+	}
+	// Server is up — probe the search endpoint with an empty query to detect missing library
+	try {
+		const probe = await requestUrl({
+			url: `${serverUrl}/wiki/search?q=test&limit=1`,
+			throw: false,
+		});
+		if (probe.status === 503) return 'no-wiki-api';
+	} catch {
+		return 'offline';
+	}
+	return 'ok';
+}
+
 async function wikiSearch(serverUrl: string, query: string): Promise<WikiSearchResult[]> {
 	const response = await requestUrl({
 		url: `${serverUrl}/wiki/search?q=${encodeURIComponent(query)}&limit=8`,
@@ -152,6 +180,7 @@ function splitComma(val: string): string[] {
 // ── Note content builders ─────────────────────────────────────────────────
 
 function buildPersonContent(note: PersonNote): string {
+	const imageEmbed = note.image ? `![[${note.image}]]\n\n` : '';
 	return [
 		'---',
 		`type: person`,
@@ -168,7 +197,7 @@ function buildPersonContent(note: PersonNote): string {
 		`tags: ${buildYamlTagArray(note.tags)}`,
 		'---',
 		'',
-		note.bio,
+		`${imageEmbed}${note.bio}`,
 	].join('\n');
 }
 
@@ -226,11 +255,11 @@ export async function executeCreatePerson(
 
 	addMessage('assistant', `Searching Wikipedia for **${name}**…`);
 
+	const serverStatus = await checkWikiServer(config.serverUrl);
+	if (serverStatus === 'offline') { replaceMessage('assistant', SERVER_OFFLINE_MSG); return; }
+	if (serverStatus === 'no-wiki-api') { replaceMessage('assistant', WIKI_API_MISSING_MSG); return; }
+
 	const results = await wikiSearch(config.serverUrl, name);
-	if (results.length === 0) {
-		replaceMessage('assistant', 'Vizier server unreachable or wikipedia-api not installed. Make sure the server is running with `pip install wikipedia-api`.');
-		return;
-	}
 
 	const selection = await showWikiSearchModal(app, results);
 	if (!selection) {
@@ -278,12 +307,15 @@ export async function executeCreatePerson(
 		});
 
 		let image = '';
-		if (pageData.image_url) {
-			replaceMessage('assistant', 'Downloading image…');
-			try {
-				image = await downloadImage(app, pageData.image_url, settings.handwritingFolder.replace('Handwritten Notes', 'Attachments') || 'Attachments');
-			} catch {
-				// image download is best-effort
+		if (pageData.image_urls.length > 0) {
+			const chosenUrl = await showImagePickerModal(app, pageData.image_urls);
+			if (chosenUrl) {
+				replaceMessage('assistant', 'Downloading image…');
+				try {
+					image = await downloadImage(app, chosenUrl, 'Attachments');
+				} catch {
+					// image download is best-effort
+				}
 			}
 		}
 
@@ -328,11 +360,11 @@ export async function executeCreateEvent(
 
 	addMessage('assistant', `Searching Wikipedia for **${title}**…`);
 
+	const serverStatus = await checkWikiServer(config.serverUrl);
+	if (serverStatus === 'offline') { replaceMessage('assistant', SERVER_OFFLINE_MSG); return; }
+	if (serverStatus === 'no-wiki-api') { replaceMessage('assistant', WIKI_API_MISSING_MSG); return; }
+
 	const results = await wikiSearch(config.serverUrl, title);
-	if (results.length === 0) {
-		replaceMessage('assistant', 'Vizier server unreachable or wikipedia-api not installed. Make sure the server is running with `pip install wikipedia-api`.');
-		return;
-	}
 
 	const selection = await showWikiSearchModal(app, results);
 	if (!selection) {

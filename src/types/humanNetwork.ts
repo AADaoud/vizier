@@ -49,7 +49,7 @@ export interface WikiPageData {
 	summary: string;
 	extract: string;
 	url: string;
-	image_url: string;
+	image_urls: string[];
 }
 
 export interface ManualPersonData {

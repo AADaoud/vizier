@@ -139,9 +139,11 @@ class Handler(BaseHTTPRequestHandler):
             if not page.exists():
                 self._reply(404, {'error': 'page not found'})
                 return
-            # Pick the first JPG/PNG image that looks like a main subject image
-            image_url = ''
-            skip_keywords = {'icon', 'logo', 'flag', 'map', 'seal', 'coat', 'blank', 'commons', 'signature', 'stub'}
+            # Collect candidate images for the user to choose from (up to 12)
+            image_urls = []
+            skip_keywords = {'icon', 'logo', 'flag', 'map', 'seal', 'coat', 'blank',
+                             'signature', 'stub', 'red_x', 'question_mark', 'edit-clear',
+                             'arrow', 'bullet', 'star', 'check', 'cross', 'wikimedia'}
             try:
                 infos = page.images.imageinfo()
                 for img_title, info_list in infos.items():
@@ -150,9 +152,10 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     if not (t.endswith('.jpg') or t.endswith('.jpeg') or t.endswith('.png')):
                         continue
-                    if info_list and info_list[0].width and info_list[0].width > 100:
-                        image_url = info_list[0].url or ''
-                        break
+                    if info_list and info_list[0].url:
+                        image_urls.append(info_list[0].url)
+                        if len(image_urls) >= 12:
+                            break
             except Exception:
                 pass  # image lookup is best-effort
             self._reply(200, {
@@ -160,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
                 'summary': page.summary,
                 'extract': page.text[:4000],
                 'url': page.fullurl,
-                'image_url': image_url,
+                'image_urls': image_urls,
             })
         except ImportError:
             self._reply(503, {'error': 'wikipedia-api not installed. Run: pip install wikipedia-api'})
