@@ -38,7 +38,7 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	thesesFolder: 'Theses',
 	reclusterMaxNotes: 100,
 	whisperModel: 'base',
-	timelineFolders: 'Human Network/Events, Human Network/People, Human Network/Ideas',
+	timelineFolders: 'Human Network/Events, Human Network/Ideas',
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {

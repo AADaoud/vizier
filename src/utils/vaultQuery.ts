@@ -11,7 +11,7 @@ export function getNotesByType(app: App, type: NoteType): TFile[] {
 }
 
 export function getEntityNotes(app: App, folders: string[]): TFile[] {
-	const folderSet = new Set(folders.filter(Boolean));
+	const folderSet = new Set(folders.filter(Boolean).map(f => f.replace(/\/$/, '')));
 	return app.vault.getMarkdownFiles().filter(f => {
 		const fm = app.metadataCache.getFileCache(f)?.frontmatter;
 		if (fm && ['person', 'event', 'idea'].includes(fm['type'] as string)) return true;
@@ -45,7 +45,7 @@ export function findEntityByName(app: App, name: string, folders?: string[]): TF
  * link cache — no file reads required.
  */
 export function getLinkGraph(app: App, folders: string[]): Map<string, string[]> {
-	const folderSet = new Set(folders.filter(Boolean));
+	const folderSet = new Set(folders.filter(Boolean).map(f => f.replace(/\/$/, '')));
 	const entityPaths = new Set(
 		app.vault.getMarkdownFiles()
 			.filter(f => {

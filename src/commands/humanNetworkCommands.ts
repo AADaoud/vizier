@@ -167,6 +167,11 @@ function buildPersonContent(note: PersonNote): string {
 }
 
 function buildEventContent(note: EventNote): string {
+	const abstractLines = note.description
+		? note.description.split('\n').map(l => `> ${l}`).join('\n')
+		: '';
+	const abstract = abstractLines ? `> [!abstract] Summary\n${abstractLines}\n` : '';
+
 	return [
 		'---',
 		`type: event`,
@@ -184,6 +189,10 @@ function buildEventContent(note: EventNote): string {
 		`created: ${today()}`,
 		`tags: ${buildYamlTagArray(note.tags)}`,
 		'---',
+		'',
+		abstract,
+		'## Commentary',
+		'',
 		'',
 	].join('\n');
 }
@@ -362,6 +371,7 @@ export async function executeCreateEvent(
 			related_people: [],
 			wikipedia: '',
 			tags: ['event'],
+			description: '',
 		};
 	} else {
 		replaceMessage('assistant', `Fetching page data for **${selection.title}**…`);
@@ -395,6 +405,7 @@ export async function executeCreateEvent(
 			related_people: structured.related_people ?? [],
 			wikipedia: pageData.url,
 			tags: ['event', ...(structured.tags ?? [])],
+			description: pageData.summary || '',
 		};
 	}
 
@@ -674,7 +685,7 @@ export async function executeTimeline(
 
 	// Include notes with type:event frontmatter OR located in any configured timeline folder
 	const timelineFolders = settings.timelineFolders
-		.split(',').map(s => s.trim()).filter(Boolean);
+		.split(',').map(s => s.trim().replace(/\/$/, '')).filter(Boolean);
 	const byType = getNotesByType(app, 'event');
 	const byFolder = getEntityNotes(app, timelineFolders);
 	const seen = new Set<string>();
@@ -700,8 +711,8 @@ export async function executeTimeline(
 			const to = parseInt(dateRangeMatch[2]!);
 			return !isNaN(year) && year >= from && year <= to;
 		}
-		// Person name lookup — check participants field
-		const person = findEntityByName(app, query, timelineFolders);
+		// Person name lookup — search people folder specifically, then check participants field
+		const person = findEntityByName(app, query, [settings.peopleFolder]);
 		if (person) {
 			const participants = fm['participants'];
 			if (Array.isArray(participants)) {
@@ -724,10 +735,12 @@ export async function executeTimeline(
 		return;
 	}
 
-	// Sort chronologically
+	// Sort chronologically — validate date is a string before comparing
 	const sorted = filtered.slice().sort((a, b) => {
-		const da = (app.metadataCache.getFileCache(a)?.frontmatter?.['date'] as string | undefined) ?? '';
-		const db = (app.metadataCache.getFileCache(b)?.frontmatter?.['date'] as string | undefined) ?? '';
+		const rawA = app.metadataCache.getFileCache(a)?.frontmatter?.['date'];
+		const rawB = app.metadataCache.getFileCache(b)?.frontmatter?.['date'];
+		const da = typeof rawA === 'string' ? rawA : '';
+		const db = typeof rawB === 'string' ? rawB : '';
 		return da.localeCompare(db);
 	});
 
@@ -739,12 +752,13 @@ export async function executeTimeline(
 		let summary = '';
 		try {
 			const body = await app.vault.cachedRead(file);
-			// Use first non-frontmatter paragraph as summary, or call AI
 			const bodyText = body.replace(/^---[\s\S]*?---\n/, '').trim();
 			const firstPara = bodyText.split('\n\n')[0]?.trim() ?? '';
 			if (firstPara && firstPara.length < 200) {
+				// Short enough to use directly
 				summary = firstPara;
-			} else {
+			} else if (bodyText.length > 50) {
+				// Only call AI when there is enough content to summarize
 				summary = await callOllama({
 					model, ollamaUrl: config.ollamaUrl,
 					messages: [{ role: 'user', content: Prompts.timelineSummary(bodyText) }],

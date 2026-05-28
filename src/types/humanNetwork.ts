@@ -27,6 +27,7 @@ export interface EventNote {
 	related_people: string[];
 	wikipedia: string;
 	tags: string[];
+	description: string;
 }
 
 export interface IdeaNote {
