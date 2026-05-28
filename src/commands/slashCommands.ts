@@ -3,6 +3,8 @@ import { callOllama, callOllamaStructured } from '../utils/ollama';
 import { mapReduceSummarize } from '../utils/chunking';
 import { Prompts } from '../prompts';
 import { ClipLearnModal } from '../ui/ClipLearnModal';
+import { sanitizeFilename, sanitizeTag, buildYamlTags, today } from '../utils/noteBuilder';
+import { AIAgentSettings } from '../settings';
 
 export interface SlashCommand {
 	id: string;
@@ -103,37 +105,90 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 	{
 		id: 'link',
 		label: '/link',
-		description: 'Add a bidirectional link between two entity notes — e.g. /link Person | Event',
+		description: 'Link two entities — e.g. /link Person | Event or /link A | B | relationship',
 		template: '/link ',
+	},
+	{
+		id: 'bridge',
+		label: '/bridge',
+		description: 'Find the shortest path between two Human Network entities — e.g. /bridge A | B',
+		template: '/bridge ',
+	},
+	{
+		id: 'timeline',
+		label: '/timeline',
+		description: 'Build a chronological timeline — e.g. /timeline Cold War or /timeline 1939..1945',
+		template: '/timeline ',
+	},
+	{
+		id: 'standardize',
+		label: '/standardize',
+		description: 'Add missing metadata to all notes in a folder — e.g. /standardize Clips',
+		template: '/standardize ',
+	},
+	{
+		id: 'socratic',
+		label: '/socratic',
+		description: 'Generate Socratic questions for the active note and capture your answers',
+		template: '/socratic',
+	},
+	{
+		id: 'recluster',
+		label: '/recluster',
+		description: 'Cluster notes in a folder into themes — e.g. /recluster Clips',
+		template: '/recluster ',
+	},
+	{
+		id: 'contradict',
+		label: '/contradict',
+		description: 'Find vault notes that contradict claims in the active note',
+		template: '/contradict',
+	},
+	{
+		id: 'sources',
+		label: '/sources',
+		description: 'Audit the active note for uncited factual claims',
+		template: '/sources',
+	},
+	{
+		id: 'thesis',
+		label: '/thesis',
+		description: 'Build a structured thesis from tagged notes — e.g. /thesis BTC',
+		template: '/thesis ',
+	},
+	{
+		id: 'weekly',
+		label: '/weekly',
+		description: 'Generate a weekly reflection scaffold from notes modified this week',
+		template: '/weekly',
+	},
+	{
+		id: 'monthly',
+		label: '/monthly',
+		description: 'Generate a monthly reflection scaffold from notes modified this month',
+		template: '/monthly',
+	},
+	{
+		id: 'freewrite',
+		label: '/freewrite',
+		description: 'Open a new timestamped blank note for free writing',
+		template: '/freewrite',
+	},
+	{
+		id: 'ingest',
+		label: '/ingest',
+		description: 'Ingest a book or document chapter-by-chapter — e.g. /ingest Books/book.pdf',
+		template: '/ingest ',
+	},
+	{
+		id: 'transcribe',
+		label: '/transcribe',
+		description: 'Transcribe an audio file or podcast URL via Whisper',
+		template: '/transcribe ',
 	},
 ];
 
 // --- helpers ---
-
-function sanitizeFilename(name: string): string {
-	const cleaned = name.replace(/[/\\:*?"<>|]/g, '-').replace(/-{2,}/g, '-').trim();
-	return cleaned || 'untitled';
-}
-
-function sanitizeTag(tag: string): string {
-	const cleaned = tag
-		.toLowerCase()
-		.replace(/\s+/g, '-')
-		.replace(/[^a-z0-9\-_]/g, '')
-		.replace(/-{2,}/g, '-')
-		.replace(/^-+|-+$/g, '');
-	return cleaned || '';
-}
-
-function buildYamlTags(tags: string[]): string {
-	return tags
-		.map(t => sanitizeTag(t))
-		.filter(t => t.length > 0)
-		.filter((t, i, arr) => arr.indexOf(t) === i)
-		.map(t => `  - ${t}`)
-		.join('\n');
-}
-
 
 function isLikelyValidUrl(url: string): boolean {
 	try {
@@ -294,7 +349,7 @@ export async function executeWrite(
 
 	const tags = [...(result.tags ?? []), 'ai'].map(sanitizeTag).filter(t => t.length > 0);
 	const yamlTags = buildYamlTags(tags);
-	const fileContent = `---\ntags:\n${yamlTags}\n---\n\n${result.body}`;
+	const fileContent = `---\ntype: write\ncreated: ${today()}\ntags:\n${yamlTags}\n---\n\n${result.body}`;
 
 	replaceMessage('assistant', 'Writing to file…');
 	try {
@@ -400,27 +455,41 @@ export async function executeFind(
 	// Merge: direct terms first, then unique AI terms
 	const allTerms = [...new Set([...directTerms, ...aiTerms.map(t => t.toLowerCase())])];
 
-	// Search vault: match terms against note titles first, then content
+	// Search vault: match terms against note titles/frontmatter first (no I/O),
+	// then read each unmatched file at most once across all terms.
 	const files = app.vault.getMarkdownFiles();
-	const matchMap = new Map<string, Set<string>>(); // title → matched terms
+	const matchMap = new Map<string, Set<string>>(); // path → matched terms
 
+	// Pass 1: basename + frontmatter title — no file reads
 	for (const term of allTerms) {
 		const lower = term.toLowerCase();
 		for (const file of files) {
 			if (file.basename.toLowerCase().includes(lower)) {
-				if (!matchMap.has(file.basename)) matchMap.set(file.basename, new Set());
-				matchMap.get(file.basename)!.add(term);
+				if (!matchMap.has(file.path)) matchMap.set(file.path, new Set());
+				matchMap.get(file.path)!.add(term);
+				continue;
+			}
+			const fm = app.metadataCache.getFileCache(file)?.frontmatter;
+			const fmTitle = ((fm?.['name'] ?? fm?.['title'] ?? '') as string).toLowerCase();
+			if (fmTitle && fmTitle.includes(lower)) {
+				if (!matchMap.has(file.path)) matchMap.set(file.path, new Set());
+				matchMap.get(file.path)!.add(term);
 			}
 		}
-		const unmatched = files.filter(f => !matchMap.has(f.basename));
-		for (const file of unmatched.slice(0, 300)) {
-			try {
-				const text = await app.vault.cachedRead(file);
-				if (text.toLowerCase().includes(lower)) {
-					if (!matchMap.has(file.basename)) matchMap.set(file.basename, new Set());
-					matchMap.get(file.basename)!.add(term);
-				}
-			} catch { /* skip */ }
+	}
+
+	// Pass 2: read each unmatched file ONCE, then test all terms against it
+	const unmatched = files.filter(f => !matchMap.has(f.path));
+	for (const file of unmatched.slice(0, 300)) {
+		let text: string;
+		try {
+			text = (await app.vault.cachedRead(file)).toLowerCase();
+		} catch { continue; }
+		for (const term of allTerms) {
+			if (text.includes(term.toLowerCase())) {
+				if (!matchMap.has(file.path)) matchMap.set(file.path, new Set());
+				matchMap.get(file.path)!.add(term);
+			}
 		}
 	}
 
@@ -429,8 +498,9 @@ export async function executeFind(
 		return;
 	}
 
-	const candidates: FindCandidate[] = [...matchMap.entries()].slice(0, 20).map(([title, termSet]) => ({
-		title,
+	const pathToBasename = new Map(files.map(f => [f.path, f.basename]));
+	const candidates: FindCandidate[] = [...matchMap.entries()].slice(0, 20).map(([path, termSet]) => ({
+		title: pathToBasename.get(path) ?? path,
 		relevance: '',
 		terms: [...termSet],
 	}));
@@ -502,7 +572,8 @@ export async function executeClip(
 	replaceMessage: ReplaceMessage,
 	model: string,
 	config: CommandConfig,
-	clipsFolder: string
+	clipsFolder: string,
+	settings?: AIAgentSettings,
 ): Promise<void> {
 	const detailed = args.startsWith('long ');
 	const url = (detailed ? args.slice(5) : args).trim();
@@ -552,11 +623,11 @@ export async function executeClip(
 		meta = { title: new URL(url).hostname, tags: ['clip'] };
 	}
 
-	const date = new Date().toISOString().slice(0, 10);
+	const date = today();
 	const safeTitle = sanitizeFilename(meta.title);
 	const filename = `${date} - ${safeTitle}`;
 	const yamlTags = buildYamlTags(['clip', ...meta.tags]);
-	const noteContent = `---\nsource: "${url}"\ndate: ${date}\ntags:\n${yamlTags}\n---\n\n${summary}`;
+	const noteContent = `---\ntype: clip\nsource: "${url}"\ncreated: ${date}\ntags:\n${yamlTags}\n---\n\n${summary}`;
 
 	replaceMessage('assistant', 'Writing to file…');
 	try {
@@ -572,6 +643,14 @@ export async function executeClip(
 			await app.vault.create(filePath, noteContent);
 		}
 		replaceMessage('assistant', `Saved to **[[${filename}]]**`);
+
+		// Entity extraction (async, non-blocking for the user message already shown)
+		if (settings) {
+			try {
+				const { runEntityExtraction } = await import('./entityExtraction');
+				await runEntityExtraction(summary, filePath, app, addMessage, model, config, settings);
+			} catch { /* entity extraction is best-effort */ }
+		}
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		replaceMessage('assistant', `Failed to save note: ${msg}`);
@@ -587,7 +666,8 @@ export async function executeClipLearn(
 	replaceMessage: ReplaceMessage,
 	model: string,
 	config: CommandConfig,
-	clipsFolder: string
+	clipsFolder: string,
+	settings?: AIAgentSettings,
 ): Promise<void> {
 	const url = args.trim();
 	if (!url || !/^https?:\/\//.test(url) || !isLikelyValidUrl(url)) {
@@ -635,11 +715,11 @@ export async function executeClipLearn(
 		meta = { title: new URL(url).hostname, tags: ['clip'] };
 	}
 
-	const date = new Date().toISOString().slice(0, 10);
+	const date = today();
 	const safeTitle = sanitizeFilename(meta.title);
 	const filename = `${date} - ${safeTitle}`;
 	const yamlTags = buildYamlTags(['clip', 'learn', ...meta.tags]);
-	const noteContent = `---\nsource: "${url}"\ndate: ${date}\ntags:\n${yamlTags}\n---\n\n${summary}`;
+	const noteContent = `---\ntype: clip\nsource: "${url}"\ncreated: ${date}\ntags:\n${yamlTags}\n---\n\n${summary}`;
 
 	replaceMessage('assistant', 'Writing to file…');
 	try {
@@ -658,6 +738,14 @@ export async function executeClipLearn(
 		const msg = err instanceof Error ? err.message : String(err);
 		replaceMessage('assistant', `Failed to save note: ${msg}`);
 		return;
+	}
+
+	// Entity extraction (non-blocking)
+	if (settings) {
+		try {
+			const { runEntityExtraction } = await import('./entityExtraction');
+			await runEntityExtraction(summary, `${clipsFolder}/${filename}.md`, app, addMessage, model, config, settings);
+		} catch { /* best-effort */ }
 	}
 
 	replaceMessage('assistant', 'Generating study guide…');
@@ -876,10 +964,10 @@ export async function executeHandwriting(
 
 	// 5. Create note with embedded image and transcription callout
 	replaceMessage('assistant', 'Creating note…');
-	const date = new Date().toISOString().slice(0, 10);
+	const date = today();
 	const noteBaseName = `${date} - Handwritten Note`;
 	const transcriptionLines = transcriptionText.split('\n').map(l => `> ${l}`).join('\n');
-	const noteContent = `---\ndate: ${date}\ntags:\n  - handwriting\n---\n\n![[${imgFilename}]]\n\n> [!note] Transcription\n${transcriptionLines}\n`;
+	const noteContent = `---\ntype: handwriting\ncreated: ${date}\ntags:\n  - handwriting\n---\n\n![[${imgFilename}]]\n\n> [!note] Transcription\n${transcriptionLines}\n`;
 
 	const baseNotePath = `${notesFolder}/${noteBaseName}.md`;
 	const noteFilePath = app.vault.getAbstractFileByPath(baseNotePath)

@@ -4,6 +4,8 @@ import { ChatView, VIEW_TYPE_AI_CHAT } from './ui/ChatView';
 import { TranscriptServerManager, ServerSetupModal } from './ui/ServerSetupModal';
 import { executeWrite, executeEdit, executeClip, executeRead, CommandConfig, AddMessage } from './commands/slashCommands';
 import { executeCreatePerson, executeCreateEvent, executeCreateIdea, executeLink } from './commands/humanNetworkCommands';
+import { executeStandardize } from './commands/miscCommands';
+import { executeSocratic, executeReflection, executeFreewrite, executeSources } from './commands/reflectionCommands';
 import { promptModal } from './ui/PromptModal';
 import { mapReduceSummarize } from './utils/chunking';
 
@@ -244,6 +246,81 @@ export default class VizierPlugin extends Plugin {
 				if (!entityB) return;
 				const { addMessage, replaceMessage } = noticeCallbacks();
 				await executeLink(`${entityA} | ${entityB}`, this.app, addMessage, replaceMessage);
+			},
+		});
+
+		// ── Standardize folder ────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-standardize',
+			name: 'Standardize metadata in folder',
+			callback: async () => {
+				const folder = await promptModal(this.app, 'Standardize metadata', 'Folder path (e.g. Clips)…');
+				if (!folder) return;
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+				await executeStandardize(folder, this.app, addMessage, replaceMessage, this.settings.defaultModel, config);
+			},
+		});
+
+		// ── Socratic questions for active note ────────────────────────
+		this.addCommand({
+			id: 'vizier-socratic',
+			name: 'Generate Socratic questions for active note',
+			editorCheckCallback: (checking) => {
+				if (!this.app.workspace.getActiveFile()) return false;
+				if (!checking) {
+					const { addMessage, replaceMessage } = noticeCallbacks();
+					const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+					void executeSocratic('', this.app, addMessage, replaceMessage, this.settings.defaultModel, config);
+				}
+				return true;
+			},
+		});
+
+		// ── Audit uncited claims ──────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-sources',
+			name: 'Audit active note for uncited claims',
+			editorCheckCallback: (checking) => {
+				if (!this.app.workspace.getActiveFile()) return false;
+				if (!checking) {
+					const { addMessage, replaceMessage } = noticeCallbacks();
+					const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+					void executeSources('', this.app, addMessage, replaceMessage, this.settings.defaultModel, config);
+				}
+				return true;
+			},
+		});
+
+		// ── Weekly reflection ─────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-weekly-reflection',
+			name: 'Generate weekly reflection',
+			callback: async () => {
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+				await executeReflection('weekly', this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings);
+			},
+		});
+
+		// ── Monthly reflection ────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-monthly-reflection',
+			name: 'Generate monthly reflection',
+			callback: async () => {
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+				await executeReflection('monthly', this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings);
+			},
+		});
+
+		// ── Freewrite ─────────────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-freewrite',
+			name: 'Open new freewrite note',
+			callback: async () => {
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				await executeFreewrite('', this.app, addMessage, replaceMessage, this.settings);
 			},
 		});
 

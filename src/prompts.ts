@@ -217,4 +217,142 @@ export const Prompts = {
 		`- bio: 2-3 paragraph plain-text explanation of the concept, its origins, and its significance\n` +
 		`- tags: 3-5 lowercase hyphenated tags\n` +
 		`${description ? `User description: ${description}\n\n` : ''}OUTPUT:`,
+
+	// ── Standardize: infer note type ──────────────────────────────────────
+	standardizeType: (content: string, tags: string[]) =>
+		`You are a note classification system.\n\n` +
+		`Given this note content, determine its type.\n` +
+		`Tags present: ${tags.join(', ') || 'none'}\n\n` +
+		`NOTE (first 500 chars):\n${content.slice(0, 500)}\n\n` +
+		`Choose ONE type:\n` +
+		`- clip: saved web article or video summary\n` +
+		`- write: AI-generated or freeform knowledge note\n` +
+		`- handwriting: transcribed handwritten content\n` +
+		`- person: biographical note about a real person\n` +
+		`- event: historical or dated event note\n` +
+		`- idea: concept, theory, or doctrine note\n` +
+		`Output only the JSON field. TYPE:`,
+
+	// ── Entity extraction from clip summary ───────────────────────────────
+	extractEntities: (summary: string) =>
+		`You are an entity extraction system.\n\n` +
+		`Extract named entities from this article summary. Return only entities clearly mentioned — do NOT invent.\n\n` +
+		`Rules:\n` +
+		`- people: real, named individuals (not organizations)\n` +
+		`- events: specific named historical or current events\n` +
+		`- ideas: named ideologies, theories, doctrines, or concepts\n` +
+		`- name: the entity's canonical name\n` +
+		`- context: one-sentence description of how this entity relates to the article\n` +
+		`- Return empty arrays if no entities of that type are found\n\n` +
+		`SUMMARY:\n${summary.slice(0, 2000)}\n\nOUTPUT:`,
+
+	// ── Bridge: explain connection between two entity notes ───────────────
+	bridgeHopRationale: (contentA: string, contentB: string) =>
+		`You are a connection analysis system. Output ONE sentence only.\n\n` +
+		`Explain the direct relationship between these two entities based on their notes.\n` +
+		`Be specific. Do NOT start with "Both" or "These". State the relationship directly.\n\n` +
+		`ENTITY A:\n${contentA.slice(0, 600)}\n\nENTITY B:\n${contentB.slice(0, 600)}\n\nCONNECTION:`,
+
+	// ── Recluster: theme clustering ───────────────────────────────────────
+	reclusterNotes: (representations: string) =>
+		`You are a thematic clustering system.\n\n` +
+		`Cluster these notes into 3-8 coherent themes. Each cluster should represent a meaningful intellectual thread, not just a topic keyword.\n\n` +
+		`Rules:\n` +
+		`- title: short descriptive theme name (3-5 words)\n` +
+		`- moc_title: suggested Map of Content title if this theme warrants one\n` +
+		`- notes: array of note titles belonging to this cluster\n` +
+		`- rationale: one sentence explaining what unifies this cluster\n` +
+		`- Every note must appear in exactly one cluster\n\n` +
+		`NOTES:\n${representations}\n\nCLUSTERS:`,
+
+	// ── Socratic: generate comprehension questions ────────────────────────
+	socraticQuestions: (content: string) =>
+		`You are a Socratic teaching system.\n\n` +
+		`Generate 3-5 open-ended questions that test genuine understanding of the key claims in this note.\n` +
+		`Rules:\n` +
+		`- Questions must test understanding, not recall of surface facts\n` +
+		`- Each question should be answerable from the note but require thinking\n` +
+		`- Do NOT generate questions about trivial details\n` +
+		`- Do NOT start questions with "What is" or "Who is"\n` +
+		`- Return only the questions array, nothing else\n\n` +
+		`NOTE:\n${content.slice(0, 3000)}\n\nQUESTIONS:`,
+
+	// ── Extract claims ────────────────────────────────────────────────────
+	extractClaims: (content: string) =>
+		`You are a claim extraction system.\n\n` +
+		`Identify the 3-8 load-bearing factual claims in this note — statements presented as true that could be verified or falsified.\n` +
+		`Rules:\n` +
+		`- Exclude opinions, questions, and observations\n` +
+		`- Each claim: one declarative sentence, specific enough to be testable\n` +
+		`- Do NOT include definitions, context-setting statements, or tautologies\n\n` +
+		`NOTE:\n${content.slice(0, 3000)}\n\nCLAIMS:`,
+
+	// ── Detect contradiction ──────────────────────────────────────────────
+	detectContradiction: (claim: string, noteContent: string) =>
+		`You are a contradiction detection system.\n\n` +
+		`Does the note below contradict this claim? A contradiction means the note asserts something that cannot both be true simultaneously.\n\n` +
+		`CLAIM: "${claim}"\n\n` +
+		`NOTE:\n${noteContent.slice(0, 1500)}\n\n` +
+		`Rules:\n` +
+		`- contradicts: true only if the note makes a direct factual claim that conflicts\n` +
+		`- reason: one sentence citing the specific conflicting statement, or "No contradiction found"\n` +
+		`- Be strict: peripheral tension is not a contradiction\n\nOUTPUT:`,
+
+	// ── Timeline: one-line summary for an event ───────────────────────────
+	timelineSummary: (noteContent: string) =>
+		`You are a timeline summarization system. Output ONE sentence only.\n\n` +
+		`Summarize what happened in this event note in one sentence. Include the most significant outcome or consequence.\n` +
+		`Do NOT start with the event name. Start with a verb or the main actor.\n\n` +
+		`NOTE:\n${noteContent.slice(0, 1000)}\n\nSUMMARY:`,
+
+	// ── Thesis document ───────────────────────────────────────────────────
+	thesisDocument: (bundle: string) =>
+		`You are a research synthesis system.\n\n` +
+		`Compile the following notes into a structured thesis document. Each claim and piece of evidence must cite its source note using [[wikilink]] syntax.\n\n` +
+		`Use EXACTLY this structure:\n\n` +
+		`## Position\n[1-2 sentence thesis statement]\n\n` +
+		`## Claims\n- [[Source]] — [claim]\n\n` +
+		`## Supporting Evidence\n- [[Source]] — [evidence]\n\n` +
+		`## Disconfirmers\n- [[Source]] — [counter-evidence or challenge]\n\n` +
+		`## Exit Conditions\n- [condition that would change the position]\n\n` +
+		`## Open Questions\n- [unresolved question]\n\n` +
+		`Rules:\n` +
+		`- Do NOT add text outside these sections\n` +
+		`- Every bullet must cite a source\n` +
+		`- Be specific; avoid vague generalities\n\n` +
+		`NOTES:\n${bundle}\n\nTHESIS:`,
+
+	// ── Reflection scaffold ───────────────────────────────────────────────
+	reflectionScaffold: (themes: string, entities: string, openQuestions: string) =>
+		`You are a reflection scaffolding system.\n\n` +
+		`Generate a weekly reflection document using only the data provided. Do NOT invent content.\n\n` +
+		`Use EXACTLY this structure. Fill model-generated sections from the data. Leave user sections empty.\n\n` +
+		`## Themes you returned to\n[list themes with note counts, from data]\n\n` +
+		`## Entities you encountered\n[list people/events/ideas with frequency, from data]\n\n` +
+		`## Questions left open\n[extract unresolved questions or incomplete threads from notes]\n\n` +
+		`## What surprised you\n*(your reflection here)*\n\n` +
+		`## What you want to revisit\n*(your reflection here)*\n\n` +
+		`## Free reflection\n*(your reflection here)*\n\n` +
+		`DATA:\nThemes: ${themes}\nEntities: ${entities}\nOpen questions from notes: ${openQuestions}\n\nSCAFFOLD:`,
+
+	// ── Ingest: per-chapter processing ────────────────────────────────────
+	ingestChapter: (title: string, content: string) =>
+		`You are a book chapter processing system.\n\n` +
+		`Process this chapter and return structured notes.\n\n` +
+		`Rules:\n` +
+		`- summary: 2-3 sentence overview of what this chapter covers\n` +
+		`- claims: 3-5 key factual claims or arguments made in the chapter\n` +
+		`- questions: 3 review questions that test understanding of this chapter\n\n` +
+		`CHAPTER: ${title}\n\n${content.slice(0, 4000)}\n\nOUTPUT:`,
+
+	// ── Sources: find uncited claims ──────────────────────────────────────
+	sourcesUncited: (content: string) =>
+		`You are a citation audit system.\n\n` +
+		`Identify factual claims in this note that lack a citation. A citation means a [[wikilink]], URL, footnote, or explicit attribution nearby.\n\n` +
+		`Rules:\n` +
+		`- Only flag specific, objectively verifiable factual claims\n` +
+		`- Do NOT flag opinions, observations, questions, or definitions\n` +
+		`- Do NOT flag claims that have a wikilink, URL, or "according to X" attribution within the same sentence or adjacent bullet\n` +
+		`- Return empty array if all claims appear cited\n\n` +
+		`NOTE:\n${content.slice(0, 3000)}\n\nUNCITED CLAIMS:`,
 };

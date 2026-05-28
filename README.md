@@ -16,9 +16,15 @@ A local, privacy-first AI agent for Obsidian powered by [Ollama](https://ollama.
 | `/clip <url>` | Fetch, summarize, and save a URL to your Clips folder |
 | `/clip long <url>` | Clip with detailed notes — ideal for long commentaries or reads |
 | `/clip learn <url>` | Clip with detailed notes plus a study guide popup — ideal for lectures |
+| `/edit <instruction>` | Edit the active note following an AI instruction |
 | `/read` | Summarize or ask a question about the active note |
 | `/handwriting` | OCR a photo of handwritten notes and save as a vault note |
+| `/person <name>` | Create a person note with biography and Wikipedia data (Human Network) |
+| `/event <title>` | Create a historical event note with Wikipedia data (Human Network) |
+| `/idea <concept>` | Create a geopolitical concept or theory note with Wikipedia data (Human Network) |
+| `/link Entity A \| Entity B` | Add a bidirectional link between two Human Network entity notes |
 | Free chat | Stream a conversation with any Ollama model |
+| Add AI abstract callout | Insert an AI-generated summary callout at the top of the active note (palette only) |
 
 All commands are also available from the **Command Palette** (Cmd/Ctrl+P).
 
@@ -58,6 +64,17 @@ The server runs on `http://127.0.0.1:11435`. You can change this in settings.
 
 Articles are fetched via [Jina AI Reader](https://jina.ai/reader/) (`r.jina.ai`), a free public service that returns clean markdown from any URL. No API key required. The only data sent is the URL you provide.
 
+## Human Network
+
+Human Network commands create interconnected entity notes for people, events, and ideas — building a knowledge graph inside your vault.
+
+- `/person <name>` — looks up the person on Wikipedia, creates a note with biography, birth/death dates, and links to related entities.
+- `/event <title>` — creates an event note with date, context, and linked people/ideas.
+- `/idea <concept>` — creates a concept or theory note with definition and linked entities.
+- `/link Entity A | Entity B` — adds a backlink in both entity notes connecting them.
+
+If Wikipedia returns no result, Vizier falls back to a manual-entry prompt. Notes are saved to configurable folders (see Settings).
+
 ## Settings
 
 | Setting | Default | Description |
@@ -68,11 +85,14 @@ Articles are fetched via [Jina AI Reader](https://jina.ai/reader/) (`r.jina.ai`)
 | Clips folder | `Clips` | Vault folder where `/clip` saves notes |
 | AI notes folder | *(empty)* | Vault folder where `/write` saves notes (empty = vault root) |
 | Handwritten notes folder | *(empty)* | Vault folder where `/handwriting` saves notes |
+| People folder | `People` | Vault folder where `/person` saves notes |
+| Events folder | `Events` | Vault folder where `/event` saves notes |
+| Ideas folder | `Ideas` | Vault folder where `/idea` saves notes |
 
 ## Building from source
 
 ```bash
-git clone https://github.com/your-username/vizier
+git clone https://github.com/AAdaoud/vizier
 cd vizier
 npm install --legacy-peer-deps
 npm run build   # production
@@ -120,4 +140,5 @@ Change the **Vizier server URL** in settings to use a different port (e.g. `http
 - All AI inference runs locally via Ollama — nothing leaves your machine.
 - The only outbound requests are to `r.jina.ai` when fetching articles (the URL you provide is sent).
 - YouTube transcripts are fetched locally via `youtube-transcript-api` — no third-party service.
+- `en.wikipedia.org` is queried when using Human Network commands (`/person`, `/event`, `/idea`) — only the name or title you provide is sent. No API key required.
 - No analytics, no telemetry, no cloud sync.

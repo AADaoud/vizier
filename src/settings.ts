@@ -11,6 +11,13 @@ export interface AIAgentSettings {
 	peopleFolder: string;
 	eventsFolder: string;
 	ideasFolder: string;
+	extractEntitiesAfterClip: boolean;
+	reflectionsFolder: string;
+	booksFolder: string;
+	transcriptsFolder: string;
+	thesesFolder: string;
+	reclusterMaxNotes: number;
+	whisperModel: string;
 }
 
 export const DEFAULT_SETTINGS: AIAgentSettings = {
@@ -23,6 +30,13 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	peopleFolder: 'Human Network/People',
 	eventsFolder: 'Human Network/Events',
 	ideasFolder: 'Human Network/Ideas',
+	extractEntitiesAfterClip: true,
+	reflectionsFolder: 'Reflections',
+	booksFolder: 'Books',
+	transcriptsFolder: 'Transcripts',
+	thesesFolder: 'Theses',
+	reclusterMaxNotes: 100,
+	whisperModel: 'base',
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {
@@ -108,6 +122,18 @@ export class AIAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
+		containerEl.createEl('h3', { text: 'Clips' });
+
+		new Setting(containerEl)
+			.setName('Extract entities after clipping')
+			.setDesc('After /clip, show a modal to link or create Human Network entities mentioned in the article.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.extractEntitiesAfterClip)
+				.onChange(async (value) => {
+					this.plugin.settings.extractEntitiesAfterClip = value;
+					await this.plugin.saveSettings();
+				}));
+
 		containerEl.createEl('h3', { text: 'Human Network' });
 
 		new Setting(containerEl)
@@ -140,6 +166,79 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.ideasFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.ideasFolder = value.trim() || DEFAULT_SETTINGS.ideasFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		containerEl.createEl('h3', { text: 'Reflection' });
+
+		new Setting(containerEl)
+			.setName('Reflections folder')
+			.setDesc('Vault folder where /weekly, /monthly, and /freewrite save notes.')
+			.addText(text => text
+				.setPlaceholder('Reflections')
+				.setValue(this.plugin.settings.reflectionsFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.reflectionsFolder = value.trim() || DEFAULT_SETTINGS.reflectionsFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		containerEl.createEl('h3', { text: 'Ingestion' });
+
+		new Setting(containerEl)
+			.setName('Books folder')
+			.setDesc('Vault folder where /ingest saves processed book notes.')
+			.addText(text => text
+				.setPlaceholder('Books')
+				.setValue(this.plugin.settings.booksFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.booksFolder = value.trim() || DEFAULT_SETTINGS.booksFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Transcripts folder')
+			.setDesc('Vault folder where /transcribe saves audio transcripts.')
+			.addText(text => text
+				.setPlaceholder('Transcripts')
+				.setValue(this.plugin.settings.transcriptsFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.transcriptsFolder = value.trim() || DEFAULT_SETTINGS.transcriptsFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Whisper model')
+			.setDesc('Model size for audio transcription. Larger models are more accurate but slower (tiny / base / small / medium).')
+			.addText(text => text
+				.setPlaceholder('base')
+				.setValue(this.plugin.settings.whisperModel)
+				.onChange(async (value) => {
+					this.plugin.settings.whisperModel = value.trim() || DEFAULT_SETTINGS.whisperModel;
+					await this.plugin.saveSettings();
+				}));
+
+		containerEl.createEl('h3', { text: 'Research' });
+
+		new Setting(containerEl)
+			.setName('Theses folder')
+			.setDesc('Vault folder where /thesis saves structured view documents.')
+			.addText(text => text
+				.setPlaceholder('Theses')
+				.setValue(this.plugin.settings.thesesFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.thesesFolder = value.trim() || DEFAULT_SETTINGS.thesesFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Max notes per recluster')
+			.setDesc('Maximum number of notes /recluster will process (most recent by modification date).')
+			.addText(text => text
+				.setPlaceholder('100')
+				.setValue(String(this.plugin.settings.reclusterMaxNotes))
+				.onChange(async (value) => {
+					const n = parseInt(value.trim());
+					this.plugin.settings.reclusterMaxNotes = isNaN(n) || n < 1 ? DEFAULT_SETTINGS.reclusterMaxNotes : n;
 					await this.plugin.saveSettings();
 				}));
 	}

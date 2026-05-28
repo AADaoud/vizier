@@ -9,21 +9,9 @@ import {
 	SlashCommand,
 	CommandConfig,
 	FindCandidate,
-	executeWrite,
-	executeEdit,
-	executeFind,
-	executeSummarize,
-	executeClip,
-	executeClipLearn,
-	executeRead,
-	executeHandwriting,
 } from '../commands/slashCommands';
-import {
-	executeCreatePerson,
-	executeCreateEvent,
-	executeCreateIdea,
-	executeLink,
-} from '../commands/humanNetworkCommands';
+import '../commands/registerAll';
+import { dispatch, CommandContext } from '../commands/registry';
 
 const HISTORY_KEY = 'vizier-chat-history';
 const MAX_HISTORY = 60;
@@ -355,88 +343,30 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector }: C
 		if (parsed) {
 			addMessage('user', text);
 
-			if (parsed.id === 'write') {
+			const ctx: CommandContext = {
+				app,
+				settings,
+				model,
+				config,
+				addMessage,
+				replaceMessage: replaceLastMessage,
+				addFindResults,
+				pendingImageFile: pendingImageFileRef.current,
+				clearPendingImage: () => {
+					pendingImageFileRef.current = null;
+					setPendingImageName(null);
+				},
+			};
+
+			const promise = dispatch(parsed.id, parsed.args, ctx);
+			if (promise !== null) {
 				setCommandLoading(true);
-				try { await executeWrite(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.aiNotesFolder); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'edit') {
-				setCommandLoading(true);
-				try { await executeEdit(parsed.args, app, addMessage, replaceLastMessage, model, config); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'find') {
-				setCommandLoading(true);
-				try { await executeFind(parsed.args, app, addMessage, replaceLastMessage, addFindResults, model, config); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'summarize') {
-				setCommandLoading(true);
-				try { await executeSummarize(parsed.args, addMessage, replaceLastMessage, model, config); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'clip') {
-				setCommandLoading(true);
-				try {
-					if (parsed.args.startsWith('learn ')) {
-						await executeClipLearn(parsed.args.slice(6), app, addMessage, replaceLastMessage, model, config, settings.clipsFolder);
-					} else {
-						await executeClip(parsed.args, app, addMessage, replaceLastMessage, model, config, settings.clipsFolder);
-					}
-				} finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'read') {
-				setCommandLoading(true);
-				try { await executeRead(parsed.args, app, addMessage, replaceLastMessage, model, config); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'handwriting') {
-				const file = pendingImageFileRef.current;
-				if (!file) {
-					addMessage('assistant', 'Paste a handwritten note image into the chat first, then send `/handwriting`.');
-					return;
-				}
-				setCommandLoading(true);
-				addMessage('assistant', 'Reading image…');
-				pendingImageFileRef.current = null;
-				setPendingImageName(null);
-				try { await executeHandwriting(file, app, replaceLastMessage, model, config, settings.handwritingFolder); }
+				try { await promise; }
 				finally { setCommandLoading(false); }
 				return;
 			}
 
-			if (parsed.id === 'person') {
-				setCommandLoading(true);
-				try { await executeCreatePerson(parsed.args, app, addMessage, replaceLastMessage, model, config, settings); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'event') {
-				setCommandLoading(true);
-				try { await executeCreateEvent(parsed.args, app, addMessage, replaceLastMessage, model, config, settings); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'idea') {
-				setCommandLoading(true);
-				try { await executeCreateIdea(parsed.args, app, addMessage, replaceLastMessage, model, config, settings); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-			if (parsed.id === 'link') {
-				setCommandLoading(true);
-				try { await executeLink(parsed.args, app, addMessage, replaceLastMessage); }
-				finally { setCommandLoading(false); }
-				return;
-			}
-
-			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /find, /summarize, /clip, /clip long, /clip learn, /read, /handwriting, /person, /event, /idea, /link`);
+			addMessage('assistant', `Unknown command \`/${parsed.id}\`. Available: /write, /edit, /find, /summarize, /clip, /clip long, /clip learn, /read, /handwriting, /person, /event, /idea, /link`);
 			return;
 		}
 

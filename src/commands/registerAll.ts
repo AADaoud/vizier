@@ -1,0 +1,121 @@
+import { register } from './registry';
+import {
+	executeWrite, executeEdit, executeFind, executeSummarize,
+	executeClip, executeClipLearn, executeRead, executeHandwriting,
+} from './slashCommands';
+import {
+	executeCreatePerson, executeCreateEvent, executeCreateIdea,
+	executeLink, executeBridge, executeTimeline,
+} from './humanNetworkCommands';
+import { executeStandardize } from './miscCommands';
+import {
+	executeSocratic, executeRecluster, executeContradict, executeSources,
+	executeThesis, executeReflection, executeFreewrite,
+} from './reflectionCommands';
+import { executeIngest, executeTranscribe } from './ingestCommands';
+
+register('write', (args, ctx) =>
+	executeWrite(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.aiNotesFolder)
+);
+
+register('edit', (args, ctx) =>
+	executeEdit(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config)
+);
+
+register('find', (args, ctx) =>
+	executeFind(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.addFindResults, ctx.model, ctx.config)
+);
+
+register('summarize', (args, ctx) =>
+	executeSummarize(args, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config)
+);
+
+register('clip', (args, ctx) => {
+	if (args.startsWith('learn ')) {
+		return executeClipLearn(args.slice(6), ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.clipsFolder, ctx.settings);
+	}
+	return executeClip(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.clipsFolder, ctx.settings);
+});
+
+register('read', (args, ctx) =>
+	executeRead(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config)
+);
+
+register('handwriting', (args, ctx) => {
+	const file = ctx.pendingImageFile ?? null;
+	if (!file) {
+		ctx.addMessage('assistant', 'Paste a handwritten note image into the chat first, then send `/handwriting`.');
+		return Promise.resolve();
+	}
+	ctx.clearPendingImage?.();
+	ctx.addMessage('assistant', 'Reading image…');
+	return executeHandwriting(file, ctx.app, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.handwritingFolder);
+});
+
+register('person', (args, ctx) =>
+	executeCreatePerson(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('event', (args, ctx) =>
+	executeCreateEvent(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('idea', (args, ctx) =>
+	executeCreateIdea(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('link', (args, ctx) =>
+	executeLink(args, ctx.app, ctx.addMessage, ctx.replaceMessage)
+);
+
+register('bridge', (args, ctx) =>
+	executeBridge(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('timeline', (args, ctx) =>
+	executeTimeline(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('standardize', (args, ctx) =>
+	executeStandardize(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config)
+);
+
+register('socratic', (args, ctx) =>
+	executeSocratic(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config)
+);
+
+register('recluster', (args, ctx) =>
+	executeRecluster(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('contradict', (args, ctx) =>
+	executeContradict(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config)
+);
+
+register('sources', (args, ctx) =>
+	executeSources(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config)
+);
+
+register('thesis', (args, ctx) =>
+	executeThesis(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('weekly', (_args, ctx) =>
+	executeReflection('weekly', ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('monthly', (_args, ctx) =>
+	executeReflection('monthly', ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('freewrite', (args, ctx) =>
+	executeFreewrite(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.settings)
+);
+
+register('ingest', (args, ctx) =>
+	executeIngest(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);
+
+register('transcribe', (args, ctx) =>
+	executeTranscribe(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
+);

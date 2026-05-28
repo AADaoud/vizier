@@ -1,8 +1,13 @@
 import { App, requestUrl } from 'obsidian';
-import { callOllamaStructured } from '../utils/ollama';
+import { callOllama, callOllamaStructured } from '../utils/ollama';
 import { Prompts } from '../prompts';
 import { AIAgentSettings } from '../settings';
 import { CommandConfig, AddMessage } from './slashCommands';
+import { findEntityByName, getLinkGraph, getNotesByType } from '../utils/vaultQuery';
+import {
+	sanitizeFilename, buildYamlArray, buildYamlTagArray, buildDateField,
+	ensureFolder, deduplicatePath, today,
+} from '../utils/noteBuilder';
 import {
 	PersonNote, EventNote, IdeaNote,
 	WikiSearchResult, WikiPageData,
@@ -63,48 +68,6 @@ const IDEA_SCHEMA = {
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-function sanitizeFilename(name: string): string {
-	const cleaned = name.replace(/[/\\:*?"<>|]/g, '-').replace(/-{2,}/g, '-').trim();
-	return cleaned || 'untitled';
-}
-
-function buildYamlArray(items: string[]): string {
-	if (items.length === 0) return '[]';
-	return '\n' + items.map(i => `  - "${i.replace(/"/g, '\\"')}"`).join('\n');
-}
-
-function buildYamlTagArray(tags: string[]): string {
-	if (tags.length === 0) return '[]';
-	const clean = tags
-		.map(t => t.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-_]/g, '').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, ''))
-		.filter(t => t.length > 0)
-		.filter((t, i, arr) => arr.indexOf(t) === i);
-	return '\n' + clean.map(t => `  - ${t}`).join('\n');
-}
-
-function buildDateField(val: string): string {
-	// ISO dates are unquoted for Obsidian Bases date parsing
-	const iso = /^\d{4}-\d{2}-\d{2}$/.test(val.trim());
-	if (iso) return val.trim();
-	return val.trim() ? `"${val.trim()}"` : '""';
-}
-
-async function ensureFolder(app: App, folderPath: string): Promise<void> {
-	if (!app.vault.getAbstractFileByPath(folderPath)) {
-		await app.vault.createFolder(folderPath);
-	}
-}
-
-async function deduplicatePath(app: App, base: string, ext = '.md'): Promise<string> {
-	let path = `${base}${ext}`;
-	let n = 2;
-	while (app.vault.getAbstractFileByPath(path)) {
-		path = `${base}-${n}${ext}`;
-		n++;
-	}
-	return path;
-}
 
 async function downloadImage(app: App, imageUrl: string, attachFolder: string): Promise<string> {
 	await ensureFolder(app, attachFolder);
@@ -194,6 +157,8 @@ function buildPersonContent(note: PersonNote): string {
 		`related_people: ${buildYamlArray(note.related_people)}`,
 		`related_events: ${buildYamlArray(note.related_events)}`,
 		`related_ideas: ${buildYamlArray(note.related_ideas)}`,
+		`relationships: []`,
+		`created: ${today()}`,
 		`tags: ${buildYamlTagArray(note.tags)}`,
 		'---',
 		'',
@@ -215,6 +180,8 @@ function buildEventContent(note: EventNote): string {
 		`related_events: ${buildYamlArray(note.related_events)}`,
 		`related_people: ${buildYamlArray(note.related_people)}`,
 		`wikipedia: "${note.wikipedia}"`,
+		`relationships: []`,
+		`created: ${today()}`,
 		`tags: ${buildYamlTagArray(note.tags)}`,
 		'---',
 		'',
@@ -230,6 +197,8 @@ function buildIdeaContent(note: IdeaNote, bio: string): string {
 		`proponents: ${buildYamlArray(note.proponents)}`,
 		`period: "${note.period.replace(/"/g, '\\"')}"`,
 		`related_ideas: ${buildYamlArray(note.related_ideas)}`,
+		`relationships: []`,
+		`created: ${today()}`,
 		`tags: ${buildYamlTagArray(note.tags)}`,
 		'---',
 		'',
@@ -487,12 +456,13 @@ export async function executeLink(
 	replaceMessage: AddMessage,
 ): Promise<void> {
 	const parts = args.split('|').map(s => s.trim());
-	if (parts.length !== 2 || !parts[0] || !parts[1]) {
-		addMessage('assistant', 'Usage: `/link Entity A | Entity B` — e.g. `/link Henry Kissinger | Cuban Missile Crisis`');
+	if (parts.length < 2 || !parts[0] || !parts[1]) {
+		addMessage('assistant', 'Usage: `/link Entity A | Entity B` or `/link Entity A | Entity B | relationship` — e.g. `/link Kissinger | Nixon | served under`');
 		return;
 	}
 
 	const [nameA, nameB] = parts as [string, string];
+	const relationship = parts[2] ?? null;
 	const files = app.vault.getMarkdownFiles();
 
 	const fileA = files.find(f => f.basename.toLowerCase() === nameA.toLowerCase());
@@ -563,11 +533,217 @@ export async function executeLink(
 		return content;
 	};
 
-	const newContentA = appendToField(contentA, fieldA, fileB.basename);
-	const newContentB = appendToField(contentB, fieldB, fileA.basename);
+	let newContentA = appendToField(contentA, fieldA, fileB.basename);
+	let newContentB = appendToField(contentB, fieldB, fileA.basename);
+
+	// Typed relationship: append to `relationships` array in both notes
+	if (relationship) {
+		const entryA = `{target: "[[${fileB.basename}]]", type: "${relationship.replace(/"/g, '\\"')}"}`;
+		const entryB = `{target: "[[${fileA.basename}]]", type: "${relationship.replace(/"/g, '\\"')}"}`;
+		newContentA = appendTypedRelationship(newContentA, entryA);
+		newContentB = appendTypedRelationship(newContentB, entryB);
+	}
 
 	await app.vault.modify(fileA, newContentA);
 	await app.vault.modify(fileB, newContentB);
 
-	replaceMessage('assistant', `Linked **[[${fileA.basename}]]** ↔ **[[${fileB.basename}]]**`);
+	const relLabel = relationship ? ` (${relationship})` : '';
+	replaceMessage('assistant', `Linked **[[${fileA.basename}]]** ↔ **[[${fileB.basename}]]**${relLabel}`);
+}
+
+function appendTypedRelationship(content: string, entry: string): string {
+	// Append to existing relationships array or insert field before closing ---
+	const fieldRegex = /(^relationships:[^\n]*(?:\n  -[^\n]*)*)/m;
+	const match = fieldRegex.exec(content);
+	if (match) {
+		const insertion = `\n  - ${entry}`;
+		return content.slice(0, match.index + match[0].length) + insertion + content.slice(match.index + match[0].length);
+	}
+	const closingFm = content.indexOf('\n---', 3);
+	if (closingFm !== -1) {
+		return content.slice(0, closingFm) + `\nrelationships:\n  - ${entry}` + content.slice(closingFm);
+	}
+	return content;
+}
+
+// ── /bridge ───────────────────────────────────────────────────────────────
+
+export async function executeBridge(
+	args: string,
+	app: App,
+	addMessage: AddMessage,
+	replaceMessage: AddMessage,
+	model: string,
+	config: CommandConfig,
+	settings: AIAgentSettings,
+): Promise<void> {
+	const parts = args.split('|').map(s => s.trim());
+	if (parts.length !== 2 || !parts[0] || !parts[1]) {
+		addMessage('assistant', 'Usage: `/bridge Entity A | Entity B` — e.g. `/bridge Kissinger | Mao Zedong`');
+		return;
+	}
+
+	const [nameA, nameB] = parts as [string, string];
+	const entityFolders = [settings.peopleFolder, settings.eventsFolder, settings.ideasFolder];
+
+	const fileA = findEntityByName(app, nameA, entityFolders);
+	const fileB = findEntityByName(app, nameB, entityFolders);
+
+	if (!fileA || !fileB) {
+		const missing = [!fileA && nameA, !fileB && nameB].filter(Boolean);
+		addMessage('assistant', `Could not find entity notes for: ${(missing as string[]).map(n => `**${n}**`).join(', ')}.`);
+		return;
+	}
+
+	if (fileA.path === fileB.path) {
+		addMessage('assistant', 'Both names resolve to the same note.');
+		return;
+	}
+
+	addMessage('assistant', `Finding path from **[[${fileA.basename}]]** to **[[${fileB.basename}]]**…`);
+
+	const graph = getLinkGraph(app, entityFolders);
+
+	// BFS
+	const visited = new Set<string>([fileA.path]);
+	const queue: string[][] = [[fileA.path]];
+	let foundPath: string[] | null = null;
+	const MAX_HOPS = 6;
+
+	while (queue.length > 0 && !foundPath) {
+		const path = queue.shift()!;
+		if (path.length > MAX_HOPS + 1) break;
+		const current = path[path.length - 1]!;
+		for (const neighbor of graph.get(current) ?? []) {
+			if (visited.has(neighbor)) continue;
+			const newPath = [...path, neighbor];
+			if (neighbor === fileB.path) { foundPath = newPath; break; }
+			visited.add(neighbor);
+			queue.push(newPath);
+		}
+	}
+
+	if (!foundPath) {
+		replaceMessage('assistant',
+			`No path found between **[[${fileA.basename}]]** and **[[${fileB.basename}]]** within ${MAX_HOPS} hops. The two entities may not be connected yet — try /link-ing them through intermediaries first.`
+		);
+		return;
+	}
+
+	// Build rationale for each hop
+	const files = app.vault.getMarkdownFiles();
+	const pathFiles = foundPath.map(p => files.find(f => f.path === p)).filter(Boolean) as typeof files;
+
+	const hops: string[] = [];
+	for (let i = 0; i < pathFiles.length - 1; i++) {
+		const a = pathFiles[i]!;
+		const b = pathFiles[i + 1]!;
+		let rationale = '';
+		try {
+			const [ca, cb] = await Promise.all([app.vault.cachedRead(a), app.vault.cachedRead(b)]);
+			rationale = await callOllama({
+				model,
+				ollamaUrl: config.ollamaUrl,
+				messages: [{ role: 'user', content: Prompts.bridgeHopRationale(ca, cb) }],
+			});
+		} catch { /* skip rationale */ }
+		hops.push(`**[[${a.basename}]]** → **[[${b.basename}]]**${rationale ? `\n> ${rationale.trim()}` : ''}`);
+	}
+
+	replaceMessage('assistant', `## Bridge: ${fileA.basename} → ${fileB.basename}\n\n${hops.join('\n\n')}`);
+}
+
+// ── /timeline ─────────────────────────────────────────────────────────────
+
+export async function executeTimeline(
+	args: string,
+	app: App,
+	addMessage: AddMessage,
+	replaceMessage: AddMessage,
+	model: string,
+	config: CommandConfig,
+	settings: AIAgentSettings,
+): Promise<void> {
+	const query = args.trim();
+	if (!query) {
+		addMessage('assistant', 'Usage: `/timeline <topic>` or `/timeline <name>` or `/timeline 1990..2000`');
+		return;
+	}
+
+	addMessage('assistant', `Building timeline for **${query}**…`);
+
+	const eventFiles = getNotesByType(app, 'event');
+	if (eventFiles.length === 0) {
+		replaceMessage('assistant', 'No event notes found. Create some with `/event` first.');
+		return;
+	}
+
+	// Parse date range
+	const dateRangeMatch = query.match(/^(\d{4})\.\.(\d{4})$/);
+
+	const filtered = eventFiles.filter(f => {
+		const fm = app.metadataCache.getFileCache(f)?.frontmatter;
+		if (!fm) return false;
+		if (dateRangeMatch) {
+			const year = parseInt((fm['date'] as string | undefined ?? '').slice(0, 4));
+			const from = parseInt(dateRangeMatch[1]!);
+			const to = parseInt(dateRangeMatch[2]!);
+			return !isNaN(year) && year >= from && year <= to;
+		}
+		// Person name lookup — check participants field
+		const entityFolders = [settings.peopleFolder, settings.eventsFolder, settings.ideasFolder];
+		const person = findEntityByName(app, query, entityFolders);
+		if (person) {
+			const participants = fm['participants'];
+			if (Array.isArray(participants)) {
+				return participants.some((p: unknown) =>
+					typeof p === 'string' && p.toLowerCase().includes(person.basename.toLowerCase())
+				);
+			}
+			return false;
+		}
+		// Keyword match on title, timeline_tags
+		const lower = query.toLowerCase();
+		const titleMatch = f.basename.toLowerCase().includes(lower);
+		const tagMatch = (fm['timeline_tags'] as string[] | undefined ?? [])
+			.some(t => t.toLowerCase().includes(lower));
+		return titleMatch || tagMatch;
+	});
+
+	if (filtered.length === 0) {
+		replaceMessage('assistant', `No event notes found matching **"${query}"**.`);
+		return;
+	}
+
+	// Sort chronologically
+	const sorted = filtered.slice().sort((a, b) => {
+		const da = (app.metadataCache.getFileCache(a)?.frontmatter?.['date'] as string | undefined) ?? '';
+		const db = (app.metadataCache.getFileCache(b)?.frontmatter?.['date'] as string | undefined) ?? '';
+		return da.localeCompare(db);
+	});
+
+	// Build timeline rows
+	const rows: string[] = [];
+	for (const file of sorted) {
+		const fm = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+		const date = (fm['date'] as string | undefined) ?? '(unknown date)';
+		let summary = '';
+		try {
+			const body = await app.vault.cachedRead(file);
+			// Use first non-frontmatter paragraph as summary, or call AI
+			const bodyText = body.replace(/^---[\s\S]*?---\n/, '').trim();
+			const firstPara = bodyText.split('\n\n')[0]?.trim() ?? '';
+			if (firstPara && firstPara.length < 200) {
+				summary = firstPara;
+			} else {
+				summary = await callOllama({
+					model, ollamaUrl: config.ollamaUrl,
+					messages: [{ role: 'user', content: Prompts.timelineSummary(bodyText) }],
+				});
+			}
+		} catch { /* skip summary */ }
+		rows.push(`**${date}** — [[${file.basename}]]${summary ? `: ${summary.trim()}` : ''}`);
+	}
+
+	replaceMessage('assistant', `## Timeline: ${query}\n\n${rows.join('\n')}`);
 }

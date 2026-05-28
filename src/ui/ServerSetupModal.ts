@@ -3,8 +3,49 @@ import { type ChildProcess, spawn, type SpawnOptions } from 'child_process';
 import * as path from 'path';
 import { logger } from '../utils/logger';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _proc = (globalThis as any).process as { env: Record<string, string>; platform?: string } | undefined;
+const IS_WINDOWS = _proc?.platform === 'win32';
+const PATH_SEP = IS_WINDOWS ? ';' : ':';
+
+const EXPANDED_PATH = IS_WINDOWS
+	? [
+		_proc?.env?.PATH ?? '',
+		_proc?.env?.USERPROFILE ? `${_proc.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python312` : '',
+		_proc?.env?.USERPROFILE ? `${_proc.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python311` : '',
+		_proc?.env?.USERPROFILE ? `${_proc.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python310` : '',
+		'C:\\Python312',
+		'C:\\Python311',
+		'C:\\Python310',
+	].filter(Boolean).join(PATH_SEP)
+	: [
+		_proc?.env?.PATH ?? '',
+		'/usr/local/bin',
+		'/usr/bin',
+		'/bin',
+		'/opt/homebrew/bin',
+		'/opt/homebrew/opt/python@3.12/bin',
+		'/opt/homebrew/opt/python@3.11/bin',
+	].filter(Boolean).join(PATH_SEP);
+
+/** Returns the venv python executable path, platform-aware. */
+function venvPython(pluginDir: string): string {
+	return IS_WINDOWS
+		? path.join(pluginDir, '.venv', 'Scripts', 'python.exe')
+		: path.join(pluginDir, '.venv', 'bin', 'python3');
+}
+
+/** Returns the venv pip executable path, platform-aware. */
+function venvPip(pluginDir: string): string {
+	return IS_WINDOWS
+		? path.join(pluginDir, '.venv', 'Scripts', 'pip.exe')
+		: path.join(pluginDir, '.venv', 'bin', 'pip3');
+}
+
 function spawnProc(cmd: string, args: string[], opts?: SpawnOptions): ChildProcess {
-	return spawn(cmd, args, opts ?? {});
+	const baseOpts = opts ?? {};
+	const env = { ...(_proc?.env ?? {}), ...(baseOpts.env as Record<string, string> | undefined), PATH: EXPANDED_PATH };
+	return spawn(cmd, args, { ...baseOpts, env });
 }
 
 function runCmd(cmd: string, args: string[], cwd: string, log: (m: string) => void): Promise<boolean> {
@@ -58,8 +99,7 @@ export class TranscriptServerManager {
 	startServer(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const script = path.join(this.pluginDir, 'vizier_server.py');
-			const venvPython = path.join(this.pluginDir, '.venv', 'bin', 'python3');
-			this.process = spawnProc(venvPython, [script], {
+			this.process = spawnProc(venvPython(this.pluginDir), [script], {
 				cwd: this.pluginDir,
 			});
 
@@ -91,7 +131,12 @@ export class TranscriptServerManager {
 
 	stopServer(): void {
 		if (this.process && !this.process.killed) {
-			this.process.kill('SIGTERM');
+			if (IS_WINDOWS && this.process.pid !== undefined) {
+				// SIGTERM is not reliable on Windows — use taskkill to ensure the tree is killed
+				spawn('taskkill', ['/pid', String(this.process.pid), '/f', '/t']);
+			} else {
+				this.process.kill('SIGTERM');
+			}
 			this.process = null;
 		}
 	}
@@ -141,7 +186,7 @@ export class ServerSetupModal extends Modal {
 			cancelBtn.disabled = true;
 
 			const pluginDir = (this.manager as unknown as { pluginDir: string }).pluginDir;
-			const pip = path.join(pluginDir, '.venv', 'bin', 'pip3');
+			const pip = venvPip(pluginDir);
 
 			// Auto-detect whether initial setup is needed
 			const alreadySetup = await this.isSetupDone(pluginDir);
@@ -218,8 +263,8 @@ export class ServerSetupModal extends Modal {
 
 	private isSetupDone(pluginDir: string): Promise<boolean> {
 		return new Promise(resolve => {
-			const venvPython = path.join(pluginDir, '.venv', 'bin', 'python3');
-			const proc = spawnProc(venvPython, ['--version']);
+			const python3 = venvPython(pluginDir);
+			const proc = spawnProc(python3, ['--version']);
 			proc.on('close', (code: number) => resolve(code === 0));
 			proc.on('error', () => resolve(false));
 		});
@@ -227,7 +272,8 @@ export class ServerSetupModal extends Modal {
 
 	private findPython(log: (m: string) => void): Promise<string | null> {
 		return new Promise((resolve) => {
-			const candidates: string[] = ['python3', 'python'];
+			// On Windows `python` is the standard launcher; on Unix prefer `python3`
+			const candidates: string[] = IS_WINDOWS ? ['python', 'python3'] : ['python3', 'python'];
 			let idx = 0;
 			const tryNext = () => {
 				if (idx >= candidates.length) { resolve(null); return; }
@@ -302,7 +348,7 @@ export class ModelDownloadModal extends Modal {
 			statusEl.textContent = 'Installing OCR libraries… this may take several minutes.';
 
 			// Install easyocr (heavy: PyTorch etc.)
-			const pip = path.join(this.pluginDir, '.venv', 'bin', 'pip3');
+			const pip = venvPip(this.pluginDir);
 			const pipOk = await runCmd(pip, ['install', 'easyocr'], this.pluginDir, log);
 			if (!pipOk) {
 				spinner.addClass('vizier-hidden');
