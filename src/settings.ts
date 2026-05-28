@@ -18,6 +18,7 @@ export interface AIAgentSettings {
 	thesesFolder: string;
 	reclusterMaxNotes: number;
 	whisperModel: string;
+	timelineFolders: string;
 }
 
 export const DEFAULT_SETTINGS: AIAgentSettings = {
@@ -37,6 +38,7 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	thesesFolder: 'Theses',
 	reclusterMaxNotes: 100,
 	whisperModel: 'base',
+	timelineFolders: 'Human Network/Events, Human Network/People, Human Network/Ideas',
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {
@@ -166,6 +168,17 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.ideasFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.ideasFolder = value.trim() || DEFAULT_SETTINGS.ideasFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Timeline folders')
+			.setDesc('Comma-separated vault folders /timeline searches. Add any folder whose notes have a date: field.')
+			.addText(text => text
+				.setPlaceholder('Human Network/Events, Human Network/People, Human Network/Ideas')
+				.setValue(this.plugin.settings.timelineFolders)
+				.onChange(async (value) => {
+					this.plugin.settings.timelineFolders = value.trim() || DEFAULT_SETTINGS.timelineFolders;
 					await this.plugin.saveSettings();
 				}));
 

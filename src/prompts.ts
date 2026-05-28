@@ -233,6 +233,23 @@ export const Prompts = {
 		`- idea: concept, theory, or doctrine note\n` +
 		`Output only the JSON field. TYPE:`,
 
+	// ── Standardize: parse created date from note text ───────────────────
+	parseCreatedDate: (excerpt: string, ctimeIso: string) =>
+		`You are a date extraction system.\n\n` +
+		`Extract the creation date of this note from its content. The note may contain date stamps in various formats such as:\n` +
+		`- "2025-11-16 at 20:16"\n` +
+		`- "202511162016" (YYYYMMDDhhmm)\n` +
+		`- "November 16, 2025"\n` +
+		`- "16/11/2025"\n` +
+		`- Any other human-readable date format\n\n` +
+		`Filesystem creation time (ctime) for context: ${ctimeIso}\n\n` +
+		`NOTE EXCERPT (first 800 chars):\n${excerpt.slice(0, 800)}\n\n` +
+		`Rules:\n` +
+		`- If a date is clearly present in the note text, use it (it is more reliable than ctime).\n` +
+		`- If no date is found in the text, fall back to the ctime date.\n` +
+		`- Output ONLY the date as YYYY-MM-DD. No explanation.\n\n` +
+		`DATE:`,
+
 	// ── Entity extraction from clip summary ───────────────────────────────
 	extractEntities: (summary: string) =>
 		`You are an entity extraction system.\n\n` +

@@ -3,7 +3,7 @@ import { callOllama, callOllamaStructured } from '../utils/ollama';
 import { Prompts } from '../prompts';
 import { AIAgentSettings } from '../settings';
 import { CommandConfig, AddMessage } from './slashCommands';
-import { findEntityByName, getLinkGraph, getNotesByType } from '../utils/vaultQuery';
+import { findEntityByName, getEntityNotes, getLinkGraph, getNotesByType } from '../utils/vaultQuery';
 import {
 	sanitizeFilename, buildYamlArray, buildYamlTagArray, buildDateField,
 	ensureFolder, deduplicatePath, today,
@@ -672,7 +672,17 @@ export async function executeTimeline(
 
 	addMessage('assistant', `Building timeline for **${query}**…`);
 
-	const eventFiles = getNotesByType(app, 'event');
+	// Include notes with type:event frontmatter OR located in any configured timeline folder
+	const timelineFolders = settings.timelineFolders
+		.split(',').map(s => s.trim()).filter(Boolean);
+	const byType = getNotesByType(app, 'event');
+	const byFolder = getEntityNotes(app, timelineFolders);
+	const seen = new Set<string>();
+	const eventFiles = [...byType, ...byFolder].filter(f => {
+		if (seen.has(f.path)) return false;
+		seen.add(f.path);
+		return true;
+	});
 	if (eventFiles.length === 0) {
 		replaceMessage('assistant', 'No event notes found. Create some with `/event` first.');
 		return;

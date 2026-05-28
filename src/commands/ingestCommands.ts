@@ -50,12 +50,11 @@ export async function executeIngest(
 		return;
 	}
 
-	addMessage('assistant', `Ingesting **${filePath}**…`);
-
 	let chapters: ServerChapter[];
 
 	if (filePath.endsWith('.pdf')) {
-		// PDF: call server endpoint
+		// PDF: requires Vizier server
+		addMessage('assistant', `Ingesting **${filePath}**… (requires Vizier server — run "Setup / start Vizier server" from the command palette if this fails)`);
 		try {
 			const resp = await fetch(`${config.serverUrl}/extract_pdf`, {
 				method: 'POST',
@@ -71,7 +70,8 @@ export async function executeIngest(
 			return;
 		}
 	} else {
-		// Markdown or EPUB: read from vault
+		// Markdown: read from vault, AI processing via Ollama
+		addMessage('assistant', `Ingesting **${filePath}**…`);
 		const vaultFile = app.vault.getAbstractFileByPath(filePath);
 		let rawContent: string;
 
@@ -194,7 +194,7 @@ export async function executeTranscribe(
 		return;
 	}
 
-	addMessage('assistant', `Transcribing **${input}**… (this may take a few minutes)`);
+	addMessage('assistant', `Transcribing **${input}**… (requires Vizier server with Whisper installed — run "Setup / start Vizier server" from the command palette if this fails. This may take several minutes.`);
 
 	let segments: TranscriptSegment[];
 

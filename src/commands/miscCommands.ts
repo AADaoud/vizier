@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import { callOllamaStructured } from '../utils/ollama';
+import { callOllama, callOllamaStructured } from '../utils/ollama';
 import { Prompts } from '../prompts';
 import { CommandConfig, AddMessage, ReplaceMessage } from './slashCommands';
 import { buildDateField } from '../utils/noteBuilder';
@@ -74,6 +74,7 @@ export async function executeStandardize(
 	addMessage('assistant', `Standardizing ${files.length} notes in \`${dir}\`…`);
 
 	let updated = 0;
+	let ctimeFallbacks = 0;
 	for (const file of files) {
 		let content: string;
 		try { content = await app.vault.read(file); } catch { continue; }
@@ -108,9 +109,23 @@ export async function executeStandardize(
 			additions.push(`type: ${type}`);
 		}
 
-		// Add created
+		// Add created — AI parses embedded timestamps in the body, with ctime as fallback context
 		if (!hasCreated) {
-			const isoDate = new Date(file.stat.ctime).toISOString().slice(0, 10);
+			const ctimeIso = new Date(file.stat.ctime).toISOString().slice(0, 10);
+			let isoDate = ctimeIso;
+			let usedFallback = false;
+			try {
+				const raw = await callOllama({
+					model,
+					ollamaUrl: config.ollamaUrl,
+					messages: [{ role: 'user', content: Prompts.parseCreatedDate(body || content, ctimeIso) }],
+				});
+				// Accept only a bare YYYY-MM-DD; discard anything that doesn't match
+				const match = raw.trim().match(/^\d{4}-\d{2}-\d{2}$/);
+				if (match) isoDate = raw.trim();
+				else usedFallback = true;
+			} catch { usedFallback = true; }
+			if (usedFallback) ctimeFallbacks++;
 			additions.push(`created: ${buildDateField(isoDate)}`);
 		}
 
@@ -131,5 +146,8 @@ export async function executeStandardize(
 		} catch { /* skip */ }
 	}
 
-	replaceMessage('assistant', `Updated **${updated}** of **${files.length}** notes in \`${dir}\`.`);
+	const fallbackNote = ctimeFallbacks > 0
+		? ` (${ctimeFallbacks} date(s) fell back to filesystem ctime — make sure Ollama is running for better results)`
+		: '';
+	replaceMessage('assistant', `Updated **${updated}** of **${files.length}** notes in \`${dir}\`.${fallbackNote}`);
 }
