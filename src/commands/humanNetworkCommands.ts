@@ -701,8 +701,7 @@ export async function executeTimeline(
 			return !isNaN(year) && year >= from && year <= to;
 		}
 		// Person name lookup — check participants field
-		const entityFolders = [settings.peopleFolder, settings.eventsFolder, settings.ideasFolder];
-		const person = findEntityByName(app, query, entityFolders);
+		const person = findEntityByName(app, query, timelineFolders);
 		if (person) {
 			const participants = fm['participants'];
 			if (Array.isArray(participants)) {
