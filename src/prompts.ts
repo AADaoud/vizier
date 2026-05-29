@@ -326,6 +326,19 @@ export const Prompts = {
 		`- reason: one sentence citing the specific conflicting statement, or "No contradiction found"\n` +
 		`- Be strict: peripheral tension is not a contradiction\n\nOUTPUT:`,
 
+	// ── Contradict: model knowledge pass ─────────────────────────────────────
+	contradictFromKnowledge: (claims: string[]) =>
+		`You are a critical thinking system with broad world knowledge.\n\n` +
+		`For each claim below, use your own knowledge to identify well-established facts, historical evidence, or scholarly consensus that directly contradicts or significantly challenges the claim.\n\n` +
+		`Rules:\n` +
+		`- Only flag genuine contradictions — where known evidence directly conflicts\n` +
+		`- If you have no contradicting evidence for a claim, skip it entirely (do NOT invent)\n` +
+		`- Each finding: one sentence citing the specific contradicting fact\n` +
+		`- Format each finding as: "**Claim N** — [contradiction]" where N is the claim number\n` +
+		`- Do NOT add introductions, conclusions, or caveats\n` +
+		`- If no claims have contradictions, output only: "No contradictions found."\n\n` +
+		`CLAIMS:\n${claims.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\nFINDINGS:`,
+
 	// ── Timeline: one-line summary for an event ───────────────────────────
 	timelineSummary: (noteContent: string) =>
 		`You are a timeline summarization system. Output ONE sentence only.\n\n` +

@@ -224,7 +224,7 @@ export async function executeContradict(
 	replaceMessage('assistant', `Checking ${claims.length} claims across vault…`);
 
 	const allFiles = app.vault.getMarkdownFiles().filter(f => f.path !== file.path);
-	const findings: string[] = [];
+	const vaultFindings: string[] = [];
 
 	for (const claim of claims) {
 		// Find candidate notes by keyword
@@ -245,18 +245,39 @@ export async function executeContradict(
 				});
 			} catch { continue; }
 			if (res.contradicts) {
-				findings.push(`**Claim:** ${claim}\n**Contradicted by [[${candidate.basename}]]:** ${res.reason}`);
+				vaultFindings.push(`**Claim:** ${claim}\n**Contradicted by [[${candidate.basename}]]:** ${res.reason}`);
 			}
 		}
 	}
 
-	if (findings.length === 0) {
+	// Model knowledge pass
+	replaceMessage('assistant', `Vault check done. Checking model knowledge…`);
+	let modelFindingsRaw = '';
+	try {
+		modelFindingsRaw = await callOllama({
+			model, ollamaUrl: config.ollamaUrl,
+			messages: [{ role: 'user', content: Prompts.contradictFromKnowledge(claims) }],
+		});
+	} catch { /* skip if Ollama unavailable */ }
+
+	const hasVault = vaultFindings.length > 0;
+	const hasModel = modelFindingsRaw.trim() && !modelFindingsRaw.toLowerCase().includes('no contradictions found');
+
+	if (!hasVault && !hasModel) {
 		replaceMessage('assistant', `No contradictions found for the ${claims.length} claims in **${file.basename}**.`);
 		return;
 	}
 
-	const appendText = `\n\n## Contradictions — ${today()}\n\n${findings.join('\n\n')}`;
-	replaceMessage('assistant', `Found ${findings.length} contradiction(s) — appending to note.\n\n${findings.join('\n\n')}`);
+	const sections: string[] = [];
+	if (hasVault) {
+		sections.push(`### From vault\n\n${vaultFindings.join('\n\n')}`);
+	}
+	if (hasModel) {
+		sections.push(`### From model knowledge\n\n${modelFindingsRaw.trim()}`);
+	}
+
+	const appendText = `\n\n## Contradictions — ${today()}\n\n${sections.join('\n\n')}`;
+	replaceMessage('assistant', `Found contradictions — appending to note.\n\n${sections.join('\n\n')}`);
 	await app.vault.modify(file, content + appendText);
 }
 
