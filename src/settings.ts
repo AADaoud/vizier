@@ -126,10 +126,11 @@ export class AIAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', { text: 'Clips' });
+		new Setting(containerEl).setName("Clips").setHeading();
 
 		new Setting(containerEl)
 			.setName('Extract entities after clipping')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('After /clip, show a modal to link or create Human Network entities mentioned in the article.')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.extractEntitiesAfterClip)
@@ -138,13 +139,15 @@ export class AIAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', { text: 'Human Network' });
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
+		new Setting(containerEl).setName("Human Network").setHeading();
 
 		new Setting(containerEl)
 			.setName('People folder')
 			.setDesc('Vault folder where /person saves person notes.')
 			.addText(text => text
-				.setPlaceholder('Human Network/People')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setPlaceholder('Human Network/People')
 				.setValue(this.plugin.settings.peopleFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.peopleFolder = value.trim() || DEFAULT_SETTINGS.peopleFolder;
@@ -155,7 +158,8 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Events folder')
 			.setDesc('Vault folder where /event saves event notes.')
 			.addText(text => text
-				.setPlaceholder('Human Network/Events')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setPlaceholder('Human Network/Events')
 				.setValue(this.plugin.settings.eventsFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.eventsFolder = value.trim() || DEFAULT_SETTINGS.eventsFolder;
@@ -166,7 +170,8 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Ideas folder')
 			.setDesc('Vault folder where /idea saves concept notes.')
 			.addText(text => text
-				.setPlaceholder('Human Network/Ideas')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setPlaceholder('Human Network/Ideas')
 				.setValue(this.plugin.settings.ideasFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.ideasFolder = value.trim() || DEFAULT_SETTINGS.ideasFolder;
@@ -177,7 +182,8 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Entities folder')
 			.setDesc('Vault folder where /entity saves generic entity notes (organizations, places, movements, etc.).')
 			.addText(text => text
-				.setPlaceholder('Human Network/Entities')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setPlaceholder('Human Network/Entities')
 				.setValue(this.plugin.settings.entitiesFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.entitiesFolder = value.trim() || DEFAULT_SETTINGS.entitiesFolder;
@@ -188,14 +194,15 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Timeline folders')
 			.setDesc('Comma-separated vault folders /timeline searches. Add any folder whose notes have a date: field.')
 			.addText(text => text
-				.setPlaceholder('Human Network/Events, Human Network/People, Human Network/Ideas')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setPlaceholder('Human Network/Events, Human Network/People, Human Network/Ideas')
 				.setValue(this.plugin.settings.timelineFolders)
 				.onChange(async (value) => {
 					this.plugin.settings.timelineFolders = value.trim() || DEFAULT_SETTINGS.timelineFolders;
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', { text: 'Reflection' });
+		new Setting(containerEl).setName("Reflection").setHeading();
 
 		new Setting(containerEl)
 			.setName('Reflections folder')
@@ -208,7 +215,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', { text: 'Ingestion' });
+		new Setting(containerEl).setName("Ingestion").setHeading();
 
 		new Setting(containerEl)
 			.setName('Books folder')
@@ -236,6 +243,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Whisper model')
 			.setDesc('Model size for audio transcription. Larger models are more accurate but slower (tiny / base / small / medium).')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('base')
 				.setValue(this.plugin.settings.whisperModel)
 				.onChange(async (value) => {
@@ -243,7 +251,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', { text: 'Research' });
+		new Setting(containerEl).setName("Research").setHeading();
 
 		new Setting(containerEl)
 			.setName('Theses folder')

@@ -1,4 +1,4 @@
-import { App, Notice } from 'obsidian';
+import { App, Notice, requestUrl } from 'obsidian';
 import { callOllamaStructured } from '../utils/ollama';
 import { Prompts } from '../prompts';
 import { AIAgentSettings } from '../settings';
@@ -56,13 +56,15 @@ export async function executeIngest(
 		// PDF: requires Vizier server
 		addMessage('assistant', `Ingesting **${filePath}**… (requires Vizier server — run "Setup / start Vizier server" from the command palette if this fails)`);
 		try {
-			const resp = await fetch(`${config.serverUrl}/extract_pdf`, {
+			const resp = await requestUrl({
+				url: `${config.serverUrl}/extract_pdf`,
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ path: filePath }),
+				throw: false,
 			});
-			if (!resp.ok) throw new Error(`Server error: ${resp.statusText}`);
-			const data = await resp.json() as { chapters?: ServerChapter[] };
+			if (resp.status >= 400) throw new Error(`Server error: HTTP ${resp.status}`);
+			const data = resp.json as { chapters?: ServerChapter[] };
 			chapters = data.chapters ?? [];
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -199,16 +201,17 @@ export async function executeTranscribe(
 	let segments: TranscriptSegment[];
 
 	try {
-		const resp = await fetch(`${config.serverUrl}/transcribe`, {
+		const resp = await requestUrl({
+			url: `${config.serverUrl}/transcribe`,
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ path_or_url: input, model: settings.whisperModel }),
+			throw: false,
 		});
-		if (!resp.ok) {
-			const errText = await resp.text();
-			throw new Error(errText || resp.statusText);
+		if (resp.status >= 400) {
+			throw new Error((resp.json as { error?: string })?.error ?? `HTTP ${resp.status}`);
 		}
-		const data = await resp.json() as { segments?: TranscriptSegment[] };
+		const data = resp.json as { segments?: TranscriptSegment[] };
 		segments = data.segments ?? [];
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);

@@ -16,6 +16,7 @@ export class WikiSearchModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		contentEl.createEl('h3', { text: 'Select a Wikipedia page' });
 
 		const list = contentEl.createDiv({ cls: 'vizier-wiki-search-list' });
@@ -39,9 +40,10 @@ export class WikiSearchModal extends Modal {
 		});
 
 		const divider = contentEl.createEl('hr', { cls: 'vizier-wiki-divider' });
-		divider.style.margin = '8px 0';
+		divider.setCssStyles({ margin: '8px 0' });
 
 		const customBtn = contentEl.createEl('button', {
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			text: 'Custom entry (not on Wikipedia)',
 			cls: 'vizier-wiki-custom-btn',
 		});

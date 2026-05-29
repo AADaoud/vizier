@@ -34,7 +34,7 @@ export class ImagePickerModal extends Modal {
 			text: 'Skip — no image',
 			cls: 'vizier-wiki-custom-btn',
 		});
-		skipBtn.style.marginTop = '10px';
+		skipBtn.setCssStyles({ marginTop: '10px' });
 		skipBtn.addEventListener('click', () => {
 			this.resolved = true;
 			this.resolve(null);

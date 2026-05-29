@@ -11,7 +11,6 @@ import {
 import {
 	PersonNote, EventNote, IdeaNote, EntityNote,
 	WikiSearchResult, WikiPageData,
-	ManualPersonData, ManualEventData,
 	PersonStructured, EventStructured, IdeaStructured,
 } from '../types/humanNetwork';
 import { showWikiSearchModal } from '../ui/WikiSearchModal';
@@ -598,7 +597,7 @@ export async function executeLink(
 
 function appendTypedRelationship(content: string, entry: string): string {
 	// Append to existing relationships array or insert field before closing ---
-	const fieldRegex = /(^relationships:[^\n]*(?:\n  -[^\n]*)*)/m;
+	const fieldRegex = /(^relationships:[^\n]*(?:\n {2}-[^\n]*)*)/m;
 	const match = fieldRegex.exec(content);
 	if (match) {
 		const insertion = `\n  - ${entry}`;
@@ -748,7 +747,7 @@ export async function executeTimeline(
 		// Person name lookup — search people folder specifically, then check participants field
 		const person = findEntityByName(app, query, [settings.peopleFolder]);
 		if (person) {
-			const participants = fm['participants'];
+			const participants = fm['participants'] as unknown;
 			if (Array.isArray(participants)) {
 				return participants.some((p: unknown) =>
 					typeof p === 'string' && p.toLowerCase().includes(person.basename.toLowerCase())
@@ -771,8 +770,8 @@ export async function executeTimeline(
 
 	// Sort chronologically — validate date is a string before comparing
 	const sorted = filtered.slice().sort((a, b) => {
-		const rawA = app.metadataCache.getFileCache(a)?.frontmatter?.['date'];
-		const rawB = app.metadataCache.getFileCache(b)?.frontmatter?.['date'];
+		const rawA = app.metadataCache.getFileCache(a)?.frontmatter?.['date'] as unknown;
+		const rawB = app.metadataCache.getFileCache(b)?.frontmatter?.['date'] as unknown;
 		const da = typeof rawA === 'string' ? rawA : '';
 		const db = typeof rawB === 'string' ? rawB : '';
 		return da.localeCompare(db);

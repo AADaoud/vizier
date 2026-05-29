@@ -1,4 +1,4 @@
-import { App, Notice, Plugin } from 'obsidian';
+import { Notice, Plugin } from 'obsidian';
 import { AIAgentSettings, DEFAULT_SETTINGS, AIAgentSettingTab } from './settings';
 import { ChatView, VIEW_TYPE_AI_CHAT } from './ui/ChatView';
 import { TranscriptServerManager, ServerSetupModal } from './ui/ServerSetupModal';
@@ -198,7 +198,8 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Create person note ─────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-create-person',
+			id: 'create-person',
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			name: 'Create person note (Human Network)',
 			callback: async () => {
 				const name = await promptModal(this.app, 'Create person note', 'Person name…');
@@ -211,7 +212,8 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Create event note ──────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-create-event',
+			id: 'create-event',
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			name: 'Create event note (Human Network)',
 			callback: async () => {
 				const title = await promptModal(this.app, 'Create event note', 'Event title…');
@@ -224,7 +226,8 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Create idea note ───────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-create-idea',
+			id: 'create-idea',
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			name: 'Create idea/concept note (Human Network)',
 			callback: async () => {
 				const concept = await promptModal(this.app, 'Create idea note', 'Concept name…');
@@ -237,7 +240,8 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Create generic entity note ────────────────────────────────
 		this.addCommand({
-			id: 'vizier-create-entity',
+			id: 'create-entity',
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			name: 'Create entity note (Human Network)',
 			callback: async () => {
 				const entityType = await promptModal(this.app, 'Create entity note', 'Entity type (e.g. organization, place, movement)…');
@@ -252,7 +256,8 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Link two entities ──────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-link-entities',
+			id: 'link-entities',
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			name: 'Link two Human Network entities',
 			callback: async () => {
 				const entityA = await promptModal(this.app, 'Link entities — first entity', 'Name of first entity…');
@@ -266,7 +271,7 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Standardize folder ────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-standardize',
+			id: 'standardize',
 			name: 'Standardize metadata in folder',
 			callback: async () => {
 				const folder = await promptModal(this.app, 'Standardize metadata', 'Folder path (e.g. Clips)…');
@@ -279,7 +284,8 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Socratic questions for active note ────────────────────────
 		this.addCommand({
-			id: 'vizier-socratic',
+			id: 'socratic',
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			name: 'Generate Socratic questions for active note',
 			editorCheckCallback: (checking) => {
 				if (!this.app.workspace.getActiveFile()) return false;
@@ -294,7 +300,7 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Audit uncited claims ──────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-sources',
+			id: 'sources',
 			name: 'Audit active note for uncited claims',
 			editorCheckCallback: (checking) => {
 				if (!this.app.workspace.getActiveFile()) return false;
@@ -309,7 +315,7 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Weekly reflection ─────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-weekly-reflection',
+			id: 'weekly-reflection',
 			name: 'Generate weekly reflection',
 			callback: async () => {
 				const { addMessage, replaceMessage } = noticeCallbacks();
@@ -320,7 +326,7 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Monthly reflection ────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-monthly-reflection',
+			id: 'monthly-reflection',
 			name: 'Generate monthly reflection',
 			callback: async () => {
 				const { addMessage, replaceMessage } = noticeCallbacks();
@@ -331,7 +337,7 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Freewrite ─────────────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-freewrite',
+			id: 'freewrite',
 			name: 'Open new freewrite note',
 			callback: async () => {
 				const { addMessage, replaceMessage } = noticeCallbacks();

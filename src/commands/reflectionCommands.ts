@@ -7,7 +7,7 @@ import {
 	ensureFolder, deduplicatePath, today, buildYamlTags,
 } from '../utils/noteBuilder';
 import {
-	getNotesModifiedSince, getNotesByFrontmatterTag, getNotesByType,
+	getNotesModifiedSince, getNotesByFrontmatterTag,
 } from '../utils/vaultQuery';
 import { chunkText } from '../utils/chunking';
 import { SocraticModal } from '../ui/SocraticModal';
@@ -64,18 +64,20 @@ export async function executeSocratic(
 	replaceMessage('assistant', `Generated ${questions.length} questions. Answering in modal…`);
 
 	await new Promise<void>(resolve => {
-		new SocraticModal(app, questions, async (answers) => {
-			const date = today();
-			const lines = questions.map((q, i) => `**Q:** ${q}\n**A:** ${answers[i]?.trim() || '*(no answer)*'}`);
-			const appendText = `\n\n## Socratic — ${date}\n\n${lines.join('\n\n')}`;
-			try {
-				const latest = await app.vault.read(file);
-				await app.vault.modify(file, latest + appendText);
-				replaceMessage('assistant', `Saved ${questions.length} Q&A pairs to **[[${file.basename}]]**.`);
-			} catch {
-				replaceMessage('assistant', 'Questions generated but could not save answers to note.');
-			}
-			resolve();
+		new SocraticModal(app, questions, (answers) => {
+			void (async () => {
+				const date = today();
+				const lines = questions.map((q, i) => `**Q:** ${q}\n**A:** ${answers[i]?.trim() || '*(no answer)*'}`);
+				const appendText = `\n\n## Socratic — ${date}\n\n${lines.join('\n\n')}`;
+				try {
+					const latest = await app.vault.read(file);
+					await app.vault.modify(file, latest + appendText);
+					replaceMessage('assistant', `Saved ${questions.length} Q&A pairs to **[[${file.basename}]]**.`);
+				} catch {
+					replaceMessage('assistant', 'Questions generated but could not save answers to note.');
+				}
+				resolve();
+			})();
 		}).open();
 	});
 }
@@ -423,7 +425,7 @@ export async function executeReflection(
 		if (['person', 'event', 'idea'].includes(fmType ?? '')) {
 			entityNames.push(file.basename);
 		}
-		const tags = fm['tags'];
+		const tags = fm['tags'] as unknown;
 		if (Array.isArray(tags)) {
 			for (const t of tags) {
 				if (typeof t === 'string' && t !== 'ai' && t !== 'clip') {
@@ -434,7 +436,7 @@ export async function executeReflection(
 		// Scan for open questions (lines ending with ?)
 		try {
 			const body = await app.vault.cachedRead(file);
-			const questions = body.match(/^[^#\-].+\?$/gm) ?? [];
+			const questions = body.match(/^[^#-].+\?$/gm) ?? [];
 			openQuestions.push(...questions.slice(0, 2));
 		} catch { /* skip */ }
 	}

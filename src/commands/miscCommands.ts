@@ -94,7 +94,7 @@ export async function executeStandardize(
 			if (!type) {
 				// Fall back to AI inference
 				try {
-					const tags = (fm.match(/^  - (.+)$/gm) ?? []).map(l => l.replace(/^  - /, '').replace(/"/g, '').trim());
+					const tags = (fm.match(/^ {2}- (.+)$/gm) ?? []).map(l => l.replace(/^ {2}- /, '').replace(/"/g, '').trim());
 					const result = await callOllamaStructured<StandardizeTypeResult>({
 						model,
 						ollamaUrl: config.ollamaUrl,

@@ -47,6 +47,7 @@ class EntityExtractionModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.createEl('h2', { text: 'Entities found in clip' });
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		contentEl.createEl('p', { text: 'Select how to handle each entity in your Human Network.' });
 
 		const groups: Record<string, EntityCandidate[]> = { People: [], Events: [], Ideas: [] };
@@ -128,9 +129,9 @@ export async function runEntityExtraction(
 	if (candidates.length === 0) return;
 
 	await new Promise<void>(resolve => {
-		new EntityExtractionModal(app, candidates, async (confirmed) => {
-			await applyEntityActions(confirmed, clipFilePath, app, addMessage, model, config, settings);
-			resolve();
+		new EntityExtractionModal(app, candidates, (confirmed) => {
+			void applyEntityActions(confirmed, clipFilePath, app, addMessage, model, config, settings)
+				.then(() => resolve());
 		}).open();
 	});
 }

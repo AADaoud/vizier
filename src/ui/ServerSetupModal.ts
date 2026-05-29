@@ -3,8 +3,7 @@ import { type ChildProcess, spawn, type SpawnOptions } from 'child_process';
 import * as path from 'path';
 import { logger } from '../utils/logger';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const _proc = (globalThis as any).process as { env: Record<string, string>; platform?: string } | undefined;
+const _proc = (globalThis as Record<string, unknown>)['process'] as { env: Record<string, string>; platform?: string } | undefined;
 const IS_WINDOWS = _proc?.platform === 'win32';
 const PATH_SEP = IS_WINDOWS ? ';' : ':';
 
@@ -168,6 +167,7 @@ export class ServerSetupModal extends Modal {
 		});
 
 		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		pre.textContent = 'Ready. Click Start to begin.\n';
 
 		const log = (msg: string) => {

@@ -13,7 +13,7 @@ export class SocraticModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		// eslint-disable-next-line obsidianmd/ui/sentence-case
+		 
 		contentEl.createEl('h2', { text: 'Socratic questions' });
 		contentEl.createEl('p', { text: 'Answer each question in your own words. Your answers will be appended to the note.' });
 

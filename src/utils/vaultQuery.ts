@@ -40,7 +40,7 @@ export function findEntityByName(app: App, name: string, folders?: string[]): TF
 		if (!fm) continue;
 		const title = ((fm['name'] ?? fm['title'] ?? '') as string).toLowerCase();
 		if (title === lower) return file;
-		const aliases = fm['aliases'];
+		const aliases = fm['aliases'] as unknown;
 		if (Array.isArray(aliases) && aliases.some((a: unknown) => typeof a === 'string' && a.toLowerCase() === lower)) return file;
 	}
 	return null;
@@ -62,7 +62,7 @@ export function getLinkGraph(app: App, folders: string[]): Map<string, string[]>
 	);
 	const graph = new Map<string, string[]>();
 	for (const filePath of entityPaths) {
-		const resolved = (app.metadataCache.resolvedLinks as Record<string, Record<string, number>>)[filePath] ?? {};
+		const resolved = app.metadataCache.resolvedLinks[filePath] ?? {};
 		graph.set(filePath, Object.keys(resolved).filter(p => entityPaths.has(p)));
 	}
 	return graph;
@@ -76,7 +76,7 @@ export function getNotesModifiedSince(app: App, since: Date): TFile[] {
 export function getNotesByFrontmatterTag(app: App, tag: string): TFile[] {
 	const lower = tag.replace(/^#/, '').toLowerCase();
 	return app.vault.getMarkdownFiles().filter(f => {
-		const fmTags = app.metadataCache.getFileCache(f)?.frontmatter?.['tags'];
+		const fmTags = app.metadataCache.getFileCache(f)?.frontmatter?.['tags'] as unknown;
 		if (Array.isArray(fmTags)) return fmTags.some((t: unknown) => typeof t === 'string' && t.toLowerCase() === lower);
 		if (typeof fmTags === 'string') return fmTags.toLowerCase() === lower;
 		return false;
