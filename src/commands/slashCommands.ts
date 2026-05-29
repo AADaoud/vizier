@@ -109,6 +109,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		template: '/link ',
 	},
 	{
+		id: 'entity',
+		label: '/entity',
+		description: 'Create a note for any entity type — e.g. /entity organization | NATO',
+		template: '/entity ',
+	},
+	{
 		id: 'bridge',
 		label: '/bridge',
 		description: 'Find the shortest path between two Human Network entities — e.g. /bridge A | B',

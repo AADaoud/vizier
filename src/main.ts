@@ -3,7 +3,7 @@ import { AIAgentSettings, DEFAULT_SETTINGS, AIAgentSettingTab } from './settings
 import { ChatView, VIEW_TYPE_AI_CHAT } from './ui/ChatView';
 import { TranscriptServerManager, ServerSetupModal } from './ui/ServerSetupModal';
 import { executeWrite, executeEdit, executeClip, executeRead, CommandConfig, AddMessage } from './commands/slashCommands';
-import { executeCreatePerson, executeCreateEvent, executeCreateIdea, executeLink } from './commands/humanNetworkCommands';
+import { executeCreatePerson, executeCreateEvent, executeCreateIdea, executeCreateEntity, executeLink } from './commands/humanNetworkCommands';
 import { executeStandardize } from './commands/miscCommands';
 import { executeSocratic, executeReflection, executeFreewrite, executeSources } from './commands/reflectionCommands';
 import { promptModal } from './ui/PromptModal';
@@ -232,6 +232,21 @@ export default class VizierPlugin extends Plugin {
 				const { addMessage, replaceMessage } = noticeCallbacks();
 				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
 				await executeCreateIdea(concept, this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings);
+			},
+		});
+
+		// ── Create generic entity note ────────────────────────────────
+		this.addCommand({
+			id: 'vizier-create-entity',
+			name: 'Create entity note (Human Network)',
+			callback: async () => {
+				const entityType = await promptModal(this.app, 'Create entity note', 'Entity type (e.g. organization, place, movement)…');
+				if (!entityType) return;
+				const name = await promptModal(this.app, 'Create entity note', `${entityType} name…`);
+				if (!name) return;
+				const { addMessage, replaceMessage } = noticeCallbacks();
+				const config: CommandConfig = { ollamaUrl: this.settings.ollamaUrl, serverUrl: this.settings.serverUrl };
+				await executeCreateEntity(`${entityType} | ${name}`, this.app, addMessage, replaceMessage, this.settings.defaultModel, config, this.settings);
 			},
 		});
 

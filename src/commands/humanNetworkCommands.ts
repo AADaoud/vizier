@@ -9,7 +9,7 @@ import {
 	ensureFolder, deduplicatePath, today,
 } from '../utils/noteBuilder';
 import {
-	PersonNote, EventNote, IdeaNote,
+	PersonNote, EventNote, IdeaNote, EntityNote,
 	WikiSearchResult, WikiPageData,
 	ManualPersonData, ManualEventData,
 	PersonStructured, EventStructured, IdeaStructured,
@@ -65,6 +65,16 @@ const IDEA_SCHEMA = {
 		tags: { type: 'array', items: { type: 'string' } },
 	},
 	required: ['title', 'domain', 'proponents', 'period', 'related_ideas', 'bio', 'tags'],
+};
+
+const ENTITY_SCHEMA = {
+	type: 'object',
+	properties: {
+		description: { type: 'string' },
+		related: { type: 'array', items: { type: 'string' } },
+		tags: { type: 'array', items: { type: 'string' } },
+	},
+	required: ['description', 'related', 'tags'],
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -212,6 +222,30 @@ function buildIdeaContent(note: IdeaNote, bio: string): string {
 		'---',
 		'',
 		bio,
+	].join('\n');
+}
+
+function buildEntityContent(note: EntityNote): string {
+	const abstractLines = note.description
+		? note.description.split('\n').map(l => `> ${l}`).join('\n')
+		: '';
+	const abstract = abstractLines ? `> [!abstract] Summary\n${abstractLines}\n` : '';
+
+	return [
+		'---',
+		`type: ${note.type}`,
+		`name: "${note.name.replace(/"/g, '\\"')}"`,
+		`wikipedia: "${note.wikipedia}"`,
+		`related: ${buildYamlArray(note.related)}`,
+		`relationships: []`,
+		`created: ${today()}`,
+		`tags: ${buildYamlTagArray(note.tags)}`,
+		'---',
+		'',
+		abstract,
+		'## Commentary',
+		'',
+		'',
 	].join('\n');
 }
 
@@ -513,7 +547,7 @@ export async function executeLink(
 			if (otherType === 'person') return 'proponents';
 			if (otherType === 'idea') return 'related_ideas';
 		}
-		return 'related_people'; // fallback
+		return 'related'; // fallback for generic entity types
 	};
 
 	const fieldA = getRelationField(typeA, typeB);
@@ -595,7 +629,7 @@ export async function executeBridge(
 	}
 
 	const [nameA, nameB] = parts as [string, string];
-	const entityFolders = [settings.peopleFolder, settings.eventsFolder, settings.ideasFolder];
+	const entityFolders = [settings.peopleFolder, settings.eventsFolder, settings.ideasFolder, settings.entitiesFolder];
 
 	const fileA = findEntityByName(app, nameA, entityFolders);
 	const fileB = findEntityByName(app, nameB, entityFolders);
@@ -769,4 +803,73 @@ export async function executeTimeline(
 	}
 
 	replaceMessage('assistant', `## Timeline: ${query}\n\n${rows.join('\n')}`);
+}
+
+// ── /entity ───────────────────────────────────────────────────────────────
+
+interface EntityStructured { description: string; related: string[]; tags: string[] }
+
+export async function executeCreateEntity(
+	args: string,
+	app: App,
+	addMessage: AddMessage,
+	replaceMessage: AddMessage,
+	model: string,
+	config: CommandConfig,
+	settings: AIAgentSettings,
+): Promise<void> {
+	const pipeIdx = args.indexOf('|');
+	const entityType = (pipeIdx !== -1 ? args.slice(0, pipeIdx).trim() : 'entity').toLowerCase() || 'entity';
+	const name = (pipeIdx !== -1 ? args.slice(pipeIdx + 1).trim() : args.trim());
+
+	if (!name) {
+		addMessage('assistant', 'Usage: `/entity <type> | <name>` — e.g. `/entity organization | NATO`');
+		return;
+	}
+
+	addMessage('assistant', `Searching Wikipedia for **${name}**…`);
+
+	const serverStatus = await checkWikiServer(config.serverUrl);
+	if (serverStatus === 'offline') { replaceMessage('assistant', SERVER_OFFLINE_MSG); return; }
+	if (serverStatus === 'no-wiki-api') { replaceMessage('assistant', WIKI_API_MISSING_MSG); return; }
+
+	const results = await wikiSearch(config.serverUrl, name);
+	const selection = await showWikiSearchModal(app, results);
+	if (!selection) { replaceMessage('assistant', 'Cancelled.'); return; }
+
+	let note: EntityNote;
+
+	if ('custom' in selection) {
+		const description = await promptModal(app, `Create ${entityType} note`, 'Brief description (optional)…') ?? '';
+		note = { type: entityType, name, description, wikipedia: '', related: [], tags: [entityType] };
+	} else {
+		replaceMessage('assistant', `Fetching page data for **${selection.title}**…`);
+		const pageData = await wikiPage(config.serverUrl, selection.title);
+		if (!pageData) { replaceMessage('assistant', 'Failed to fetch Wikipedia page data.'); return; }
+
+		replaceMessage('assistant', 'Structuring data with AI…');
+		const structured = await callOllamaStructured<EntityStructured>({
+			messages: [{ role: 'user', content: Prompts.structureEntity(selection.title, entityType, pageData.extract) }],
+			model,
+			ollamaUrl: config.ollamaUrl,
+			format: ENTITY_SCHEMA,
+		});
+
+		note = {
+			type: entityType,
+			name: selection.title,
+			description: structured.description ?? '',
+			wikipedia: pageData.url,
+			related: structured.related ?? [],
+			tags: [entityType, ...(structured.tags ?? [])],
+		};
+	}
+
+	const typeFolder = `${settings.entitiesFolder}/${entityType}`;
+	await ensureFolder(app, typeFolder);
+	const base = `${typeFolder}/${sanitizeFilename(note.name)}`;
+	const filePath = await deduplicatePath(app, base);
+	await app.vault.create(filePath, buildEntityContent(note));
+
+	replaceMessage('assistant', `Created **${entityType}** note [[${note.name}]] → \`${filePath}\``);
 }

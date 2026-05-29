@@ -19,6 +19,7 @@ export interface AIAgentSettings {
 	reclusterMaxNotes: number;
 	whisperModel: string;
 	timelineFolders: string;
+	entitiesFolder: string;
 }
 
 export const DEFAULT_SETTINGS: AIAgentSettings = {
@@ -38,7 +39,8 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	thesesFolder: 'Theses',
 	reclusterMaxNotes: 100,
 	whisperModel: 'base',
-	timelineFolders: 'Human Network/Events, Human Network/Ideas',
+	timelineFolders: 'Human Network/Events, Human Network/People, Human Network/Ideas',
+	entitiesFolder: 'Human Network/Entities',
 };
 
 export class AIAgentSettingTab extends PluginSettingTab {
@@ -168,6 +170,17 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.ideasFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.ideasFolder = value.trim() || DEFAULT_SETTINGS.ideasFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Entities folder')
+			.setDesc('Vault folder where /entity saves generic entity notes (organizations, places, movements, etc.).')
+			.addText(text => text
+				.setPlaceholder('Human Network/Entities')
+				.setValue(this.plugin.settings.entitiesFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.entitiesFolder = value.trim() || DEFAULT_SETTINGS.entitiesFolder;
 					await this.plugin.saveSettings();
 				}));
 

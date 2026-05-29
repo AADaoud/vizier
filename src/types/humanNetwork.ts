@@ -30,6 +30,15 @@ export interface EventNote {
 	description: string;
 }
 
+export interface EntityNote {
+	type: string;
+	name: string;
+	description: string;
+	wikipedia: string;
+	related: string[];
+	tags: string[];
+}
+
 export interface IdeaNote {
 	type: 'idea';
 	title: string;

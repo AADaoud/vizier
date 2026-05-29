@@ -218,6 +218,17 @@ export const Prompts = {
 		`- tags: 3-5 lowercase hyphenated tags\n` +
 		`${description ? `User description: ${description}\n\n` : ''}OUTPUT:`,
 
+	// ── Human Network: generic entity note ───────────────────────────────
+	structureEntity: (name: string, entityType: string, extract: string) =>
+		`You are a knowledge extraction system.\n\n` +
+		`Generate a structured entry for the ${entityType} "${name}".\n\n` +
+		`Rules:\n` +
+		`- description: 2-3 paragraph plain-text description of what this ${entityType} is, its origin, and its significance\n` +
+		`- related: array of "[[Name]]" wikilinks for closely related people, events, organizations, places, or concepts mentioned in the text\n` +
+		`- tags: 3-5 lowercase hyphenated tags\n` +
+		`- Do NOT invent information not present in the text\n\n` +
+		`WIKIPEDIA TEXT:\n${extract}\n\nOUTPUT:`,
+
 	// ── Standardize: infer note type ──────────────────────────────────────
 	standardizeType: (content: string, tags: string[]) =>
 		`You are a note classification system.\n\n` +

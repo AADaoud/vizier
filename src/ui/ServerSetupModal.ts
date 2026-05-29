@@ -185,6 +185,15 @@ export class ServerSetupModal extends Modal {
 			startBtn.disabled = true;
 			cancelBtn.disabled = true;
 
+			// If already running in this session, skip entirely
+			if (this.manager.isRunning) {
+				log('Server is already running.');
+				new Notice('Vizier server is running.');
+				this.onStarted();
+				this.close();
+				return;
+			}
+
 			const pluginDir = (this.manager as unknown as { pluginDir: string }).pluginDir;
 			const pip = venvPip(pluginDir);
 
@@ -225,6 +234,17 @@ export class ServerSetupModal extends Modal {
 				if (!wikiOk) {
 					log('⚠ Could not install wikipedia-api — Wikipedia features will be unavailable.');
 				}
+			}
+
+			log('Checking if server is already running…');
+			const alreadyRunning = await this.manager.isServerReachable(this.serverUrl);
+			if (alreadyRunning) {
+				log('Server is already running.');
+				new Notice('Vizier server is running.');
+				this.onStarted();
+				this.close();
+				void this.checkModelsAndPrompt();
+				return;
 			}
 
 			log('Starting server…');

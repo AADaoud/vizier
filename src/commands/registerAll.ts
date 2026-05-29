@@ -4,7 +4,7 @@ import {
 	executeClip, executeClipLearn, executeRead, executeHandwriting,
 } from './slashCommands';
 import {
-	executeCreatePerson, executeCreateEvent, executeCreateIdea,
+	executeCreatePerson, executeCreateEvent, executeCreateIdea, executeCreateEntity,
 	executeLink, executeBridge, executeTimeline,
 } from './humanNetworkCommands';
 import { executeStandardize } from './miscCommands';
@@ -66,6 +66,10 @@ register('idea', (args, ctx) =>
 
 register('link', (args, ctx) =>
 	executeLink(args, ctx.app, ctx.addMessage, ctx.replaceMessage)
+);
+
+register('entity', (args, ctx) =>
+	executeCreateEntity(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
 );
 
 register('bridge', (args, ctx) =>

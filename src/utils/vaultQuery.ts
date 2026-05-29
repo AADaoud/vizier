@@ -1,6 +1,14 @@
 import { App, TFile } from 'obsidian';
 
 type EntityType = 'person' | 'event' | 'idea';
+
+function matchesFolder(filePath: string, folderSet: Set<string>): boolean {
+	const folder = filePath.substring(0, filePath.lastIndexOf('/'));
+	for (const f of folderSet) {
+		if (folder === f || folder.startsWith(f + '/')) return true;
+	}
+	return false;
+}
 export type NoteType = 'clip' | 'write' | 'handwriting' | EntityType;
 
 export function getNotesByType(app: App, type: NoteType): TFile[] {
@@ -16,18 +24,16 @@ export function getEntityNotes(app: App, folders: string[]): TFile[] {
 		const fm = app.metadataCache.getFileCache(f)?.frontmatter;
 		if (fm && ['person', 'event', 'idea'].includes(fm['type'] as string)) return true;
 		if (folderSet.size === 0) return false;
-		const folder = f.path.substring(0, f.path.lastIndexOf('/'));
-		return folderSet.has(folder);
+		return matchesFolder(f.path, folderSet);
 	});
 }
 
 export function findEntityByName(app: App, name: string, folders?: string[]): TFile | null {
 	const lower = name.toLowerCase();
-	const folderSet = folders ? new Set(folders.filter(Boolean)) : null;
+	const folderSet = folders ? new Set(folders.filter(Boolean).map(f => f.replace(/\/$/, ''))) : null;
 	for (const file of app.vault.getMarkdownFiles()) {
 		if (folderSet && folderSet.size > 0) {
-			const folder = file.path.substring(0, file.path.lastIndexOf('/'));
-			if (!folderSet.has(folder)) continue;
+			if (!matchesFolder(file.path, folderSet)) continue;
 		}
 		if (file.basename.toLowerCase() === lower) return file;
 		const fm = app.metadataCache.getFileCache(file)?.frontmatter;
@@ -50,8 +56,7 @@ export function getLinkGraph(app: App, folders: string[]): Map<string, string[]>
 		app.vault.getMarkdownFiles()
 			.filter(f => {
 				if (folderSet.size === 0) return false;
-				const folder = f.path.substring(0, f.path.lastIndexOf('/'));
-				return folderSet.has(folder);
+				return matchesFolder(f.path, folderSet);
 			})
 			.map(f => f.path)
 	);
