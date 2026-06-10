@@ -216,6 +216,18 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		description: 'Generate a daily briefing from intake, recent work, and open tensions',
 		template: '/briefing',
 	},
+	{
+		id: 'research',
+		label: '/research',
+		description: 'Deep research a topic: vault + Wikipedia + synthesis note with claims',
+		template: '/research ',
+	},
+	{
+		id: 'curriculum',
+		label: '/curriculum',
+		description: 'Build an ordered self-study curriculum for a topic',
+		template: '/curriculum ',
+	},
 ];
 
 // --- helpers ---

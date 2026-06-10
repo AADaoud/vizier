@@ -15,6 +15,7 @@ import { setAgentVaultIndex, setAgentPluginDir, setAgentMemoryManager } from './
 import { MemoryManager } from './memory/memory_manager';
 import { VaultIndex } from './memory/vault_index';
 import { runContradictionScan } from './epistemic/contradiction_engine';
+import { schedulerTick, TICK_MS, STARTUP_DELAY } from './scheduler';
 
 // ── Notice-based message helpers ───────────────────────────────────────────
 
@@ -183,6 +184,29 @@ export default class VizierPlugin extends Plugin {
 			name: 'Generate daily briefing',
 			callback: () => { void this.activateChatView('/briefing'); },
 		});
+
+		// ── Phase 6: proactive scheduler ───────────────────────────────
+		// Daily cadence (intake → briefing → contradiction scan) while
+		// Obsidian is open. First tick is delayed so reindex/warmup finish.
+		if (pluginDir) {
+			const tick = () => {
+				void schedulerTick(this.app, this.settings, pluginDir, this.memoryManager)
+					.catch((err: unknown) => console.warn('[Vizier] scheduler tick failed:', err));
+			};
+			this.registerInterval(window.setTimeout(tick, STARTUP_DELAY) as unknown as number);
+			this.registerInterval(window.setInterval(tick, TICK_MS));
+
+			this.addCommand({
+				id: 'run-daily-jobs',
+				name: 'Run daily jobs now (intake, briefing, contradiction scan)',
+				callback: () => {
+					new Notice('Running daily jobs…');
+					void schedulerTick(this.app, this.settings, pluginDir, this.memoryManager, true)
+						.then(ran => new Notice(ran.length ? `Daily jobs done: ${ran.join(', ')}` : 'No jobs enabled — check feature toggles in settings.', 8000))
+						.catch((err: unknown) => new Notice(`Daily jobs failed: ${err instanceof Error ? err.message : String(err)}`, 8000));
+				},
+			});
+		}
 
 		// ── Write note with AI ─────────────────────────────────────────
 		this.addCommand({

@@ -64,6 +64,7 @@ let _pluginDir = '';
 let _memoryManager: MemoryManager | null = null;
 
 export function setAgentVaultIndex(vi: VaultIndex | null): void { _vaultIndex = vi; }
+export function getAgentVaultIndex(): VaultIndex | null { return _vaultIndex; }
 export function setAgentPluginDir(dir: string): void { _pluginDir = dir; }
 export function getAgentPluginDir(): string { return _pluginDir; }
 export function setAgentMemoryManager(mm: MemoryManager | null): void { _memoryManager = mm; }

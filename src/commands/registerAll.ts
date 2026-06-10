@@ -17,7 +17,8 @@ import { executeIngest, executeTranscribe } from './ingestCommands';
 import { executeGaps } from './gapsCommand';
 import { runIntake } from '../intake/feeds';
 import { generateBriefing } from '../intake/briefing';
-import { getAgentPluginDir, getAgentMemoryManager } from '../agent/tool_execution';
+import { getAgentPluginDir, getAgentMemoryManager, getAgentVaultIndex } from '../agent/tool_execution';
+import { executeResearch, executeCurriculum } from '../research/deep_research';
 
 register('write', (args, ctx) =>
 	executeWrite(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.aiNotesFolder)
@@ -151,6 +152,14 @@ register('intake', async (_args, ctx) => {
 		ctx.replaceMessage('assistant', `Intake failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
 });
+
+register('research', (args, ctx) =>
+	executeResearch(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.settings, getAgentVaultIndex())
+);
+
+register('curriculum', (args, ctx) =>
+	executeCurriculum(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.settings)
+);
 
 register('briefing', async (_args, ctx) => {
 	ctx.addMessage('assistant', 'Generating briefing…');
