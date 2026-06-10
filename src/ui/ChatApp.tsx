@@ -199,8 +199,11 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	const pendingImageFileRef = useRef<File | null>(null);
 	const [pendingImageName, setPendingImageName] = useState<string | null>(null);
 
-	// Track whether current agent run is cancelled (stop button / sidebar closed)
-	const cancelledRef = useRef(false);
+	// Monotonic run id. Stop (or a newer send) bumps it; a still-running old
+	// loop sees the mismatch and its events are ignored. A plain cancelled
+	// boolean is not enough: resetting it for run N+1 would let zombie events
+	// from run N through, corrupting the new message's chips and tokens.
+	const runIdRef = useRef(0);
 
 	const isLoading = commandLoading || streaming;
 	const isSplash  = messages.length === 0;
@@ -319,7 +322,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	// ── Agent loop integration ─────────────────────────────────────────
 
 	const stopRun = useCallback(() => {
-		cancelledRef.current = true;
+		runIdRef.current++; // invalidate the in-flight run
 		setAgentStatus(null);
 		setStreaming(false);
 		setMessages(prev => {
@@ -334,7 +337,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	const sendToAgent = useCallback(async (history: Message[], userContent: string) => {
 		setStreaming(true);
 		setAgentStatus('Thinking…');
-		cancelledRef.current = false;
+		const myRun = ++runIdRef.current;
 
 		// Add user message + blank assistant placeholder
 		setMessages(prev => [
@@ -358,7 +361,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 				app,
 				settings,
 				(event: AgentEvent) => {
-					if (cancelledRef.current) return;
+					if (runIdRef.current !== myRun) return; // stopped or superseded
 
 					if (event.type === 'meta') {
 						setMessages(prev => {
@@ -424,7 +427,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 			);
 
 			// Post-turn memory extraction (non-blocking, only if memory feature enabled)
-			if (settings.features.memory && memoryManager) {
+			if (settings.features.memory && memoryManager && runIdRef.current === myRun) {
 				const turnMessages = [
 					{ role: 'user' as const, content: userContent },
 					...(assistantText ? [{ role: 'assistant' as const, content: assistantText.slice(0, 4000) }] : []),
@@ -439,7 +442,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 			}
 
 		} catch (err) {
-			if (!cancelledRef.current) {
+			if (runIdRef.current === myRun) {
 				const msg = err instanceof Error ? err.message : String(err);
 				setMessages(prev => {
 					const last = prev[prev.length - 1];
@@ -450,8 +453,11 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 				});
 			}
 		} finally {
-			setAgentStatus(null);
-			setStreaming(false);
+			// A zombie run finishing must not clobber a newer run's UI state
+			if (runIdRef.current === myRun) {
+				setAgentStatus(null);
+				setStreaming(false);
+			}
 		}
 	}, [app, settings, memoryManager]);
 

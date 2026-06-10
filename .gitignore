@@ -22,3 +22,11 @@ data.json
 .DS_Store
 .claude
 .venv
+# Vizier runtime data — written by the plugin at runtime, never source
+vault_index.json
+vizier_runs.jsonl
+vizier_runs.jsonl.1
+memories.json
+contradiction_state.json
+intake_state.json
+scheduler_state.json
