@@ -14,6 +14,7 @@ import '../commands/registerAll';
 import { dispatch, CommandContext } from '../commands/registry';
 import { runAgentLoop, type AgentEvent } from '../agent/loop';
 import type { MemoryManager } from '../memory/memory_manager';
+import { getActivities, onActivityChange, beginActivity, endActivity, type ActivityItem } from './activity';
 
 const HISTORY_KEY = 'vizier-chat-history';
 const MAX_HISTORY = 60;
@@ -33,6 +34,7 @@ export interface ToolChip {
 	name: string;
 	status: 'running' | 'done' | 'error';
 	preview: string;
+	output?: string;
 	duration_ms?: number;
 }
 
@@ -41,6 +43,7 @@ interface Message {
 	content: string;
 	findResults?: { query: string; candidates: FindCandidate[] };
 	toolChips?: ToolChip[];
+	model?: string;
 }
 
 interface ChatAppProps {
@@ -115,22 +118,64 @@ const DotBounce = () => (
 	</div>
 );
 
-const ToolChipList = ({ chips }: { chips: ToolChip[] }) => (
-	<div className="vizier-tool-chips">
-		{chips.map((chip, i) => (
-			<div key={i} className={`vizier-tool-chip vizier-tool-chip--${chip.status}`}>
-				<span className="vizier-tool-chip-icon">
-					{chip.status === 'running' ? '⟳' : chip.status === 'done' ? '✓' : '✗'}
+function formatMs(ms: number): string {
+	return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+/** One tool call rendered as a pill; click to expand the full result. */
+const ToolChipItem = ({ chip }: { chip: ToolChip }) => {
+	const [expanded, setExpanded] = useState(false);
+	const expandable = !!chip.output && chip.status !== 'running';
+
+	return (
+		<div className="vizier-tool-chip-wrap">
+			<button
+				className={`vizier-tool-chip vizier-tool-chip--${chip.status}${expandable ? ' vizier-tool-chip--expandable' : ''}`}
+				onClick={() => expandable && setExpanded(e => !e)}
+				title={expandable ? (expanded ? 'Collapse result' : 'Show full result') : chip.name}
+			>
+				<span className="vizier-tool-chip-icon" aria-hidden="true">
+					{chip.status === 'running' ? '◐' : chip.status === 'done' ? '✓' : '✗'}
 				</span>
 				<span className="vizier-tool-chip-name">{chip.name}</span>
 				{chip.preview && <span className="vizier-tool-chip-preview">{chip.preview}</span>}
 				{chip.duration_ms !== undefined && chip.status !== 'running' && (
-					<span className="vizier-tool-chip-ms">{chip.duration_ms}ms</span>
+					<span className="vizier-tool-chip-ms">{formatMs(chip.duration_ms)}</span>
 				)}
-			</div>
-		))}
+				{expandable && <span className="vizier-tool-chip-caret">{expanded ? '▾' : '▸'}</span>}
+			</button>
+			{expanded && chip.output && (
+				<div className="vizier-tool-chip-output">
+					<MarkdownMessage content={chip.output} />
+				</div>
+			)}
+		</div>
+	);
+};
+
+const ToolChipList = ({ chips }: { chips: ToolChip[] }) => (
+	<div className="vizier-tool-chips">
+		{chips.map((chip, i) => <ToolChipItem key={i} chip={chip} />)}
 	</div>
 );
+
+/** Live ticker of background work — indexing, memory, skills, scheduler. */
+const ActivityBar = ({ items }: { items: ActivityItem[] }) => {
+	if (items.length === 0) return null;
+	return (
+		<div className="vizier-activity-bar">
+			{items.map(item => (
+				<div key={item.id} className={`vizier-activity-item vizier-activity-item--${item.status}`}>
+					<span className="vizier-activity-icon" aria-hidden="true">
+						{item.status === 'running' ? '◐' : item.status === 'done' ? '✓' : '✗'}
+					</span>
+					<span className="vizier-activity-label">{item.label}</span>
+					{item.detail && <span className="vizier-activity-detail">{item.detail}</span>}
+				</div>
+			))}
+		</div>
+	);
+};
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -146,12 +191,15 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'online' | 'offline'>('checking');
 	const [splashIdx, setSplashIdx] = useState(0);
 	const [splashFade, setSplashFade] = useState(false);
+	const [agentStatus, setAgentStatus] = useState<string | null>(null);
+	const [activities, setActivities] = useState<ActivityItem[]>(() => getActivities());
 	const bottomRef = useRef<HTMLDivElement>(null);
+	const messagesRef = useRef<HTMLDivElement>(null);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const pendingImageFileRef = useRef<File | null>(null);
 	const [pendingImageName, setPendingImageName] = useState<string | null>(null);
 
-	// Track whether current agent run is cancelled (e.g. sidebar closed)
+	// Track whether current agent run is cancelled (stop button / sidebar closed)
 	const cancelledRef = useRef(false);
 
 	const isLoading = commandLoading || streaming;
@@ -177,7 +225,16 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 
 	useEffect(() => { void fetchModels(); }, [fetchModels]);
 	useEffect(() => { saveHistory(app, messages); }, [messages]);
-	useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, commandLoading, streaming]);
+	useEffect(() => onActivityChange(() => setActivities(getActivities())), []);
+
+	// Smart auto-scroll: follow the stream only while the user is near the
+	// bottom — scrolling up to re-read must not get yanked back down.
+	useEffect(() => {
+		const el = messagesRef.current;
+		if (!el) return;
+		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+		if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+	}, [messages, commandLoading, streaming, agentStatus]);
 
 	useEffect(() => {
 		if (initialCommand) {
@@ -261,8 +318,22 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 
 	// ── Agent loop integration ─────────────────────────────────────────
 
+	const stopRun = useCallback(() => {
+		cancelledRef.current = true;
+		setAgentStatus(null);
+		setStreaming(false);
+		setMessages(prev => {
+			const last = prev[prev.length - 1];
+			if (last?.role === 'assistant' && last.content === '' && !last.toolChips?.length) {
+				return [...prev.slice(0, -1), { ...last, content: '*Stopped.*' }];
+			}
+			return prev;
+		});
+	}, []);
+
 	const sendToAgent = useCallback(async (history: Message[], userContent: string) => {
 		setStreaming(true);
+		setAgentStatus('Thinking…');
 		cancelledRef.current = false;
 
 		// Add user message + blank assistant placeholder
@@ -289,8 +360,18 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 				(event: AgentEvent) => {
 					if (cancelledRef.current) return;
 
-					if (event.type === 'token') {
+					if (event.type === 'meta') {
+						setMessages(prev => {
+							const last = prev[prev.length - 1];
+							if (last?.role === 'assistant') {
+								return [...prev.slice(0, -1), { ...last, model: event.model }];
+							}
+							return prev;
+						});
+
+					} else if (event.type === 'token') {
 						assistantText += event.content;
+						setAgentStatus(null); // prose is flowing — status line is noise now
 						setMessages(prev => {
 							const last = prev[prev.length - 1];
 							if (last?.role === 'assistant') {
@@ -299,7 +380,11 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 							return prev;
 						});
 
+					} else if (event.type === 'round_end') {
+						if (event.round > 1) setAgentStatus(`Thinking — round ${event.round}…`);
+
 					} else if (event.type === 'tool_start') {
+						setAgentStatus(`Running ${event.name}…`);
 						const chip: ToolChip = { name: event.name, status: 'running', preview: '' };
 						setMessages(prev => {
 							const last = prev[prev.length - 1];
@@ -311,12 +396,13 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 						});
 
 					} else if (event.type === 'tool_result') {
+						setAgentStatus('Thinking…');
 						setMessages(prev => {
 							const last = prev[prev.length - 1];
 							if (last?.role === 'assistant') {
 								const chips = (last.toolChips ?? []).map(c =>
 									c.name === event.name && c.status === 'running'
-										? { ...c, status: event.ok ? 'done' : 'error', preview: event.preview, duration_ms: event.duration_ms } as ToolChip
+										? { ...c, status: event.ok ? 'done' : 'error', preview: event.preview, output: event.output, duration_ms: event.duration_ms } as ToolChip
 										: c
 								);
 								return [...prev.slice(0, -1), { ...last, toolChips: chips }];
@@ -343,7 +429,13 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 					{ role: 'user' as const, content: userContent },
 					...(assistantText ? [{ role: 'assistant' as const, content: assistantText.slice(0, 4000) }] : []),
 				];
-				void memoryManager.extractFromTurn(turnMessages, settings).catch(() => { /* best-effort */ });
+				beginActivity('memory', 'Looking for facts worth remembering');
+				void memoryManager.extractFromTurn(turnMessages, settings)
+					.then(added => {
+						if (added.length > 0) endActivity('memory', true, `Remembered: ${added.map(m => m.text).join(' · ').slice(0, 90)}`);
+						else endActivity('memory', true, undefined, true); // nothing learned — vanish
+					})
+					.catch(() => endActivity('memory', true, undefined, true));
 			}
 
 		} catch (err) {
@@ -358,6 +450,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 				});
 			}
 		} finally {
+			setAgentStatus(null);
 			setStreaming(false);
 		}
 	}, [app, settings, memoryManager]);
@@ -528,7 +621,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 					value={ollamaStatus === 'online' ? model : ''}
 					onChange={e => setModel(e.target.value)}
 					disabled={ollamaStatus !== 'online'}
-					title="Active Ollama model"
+					title="Model for slash commands. Free-form chat uses the role chains from Vizier settings."
 				>
 					{ollamaStatus === 'checking' && <option value="">Loading…</option>}
 					{ollamaStatus === 'offline'  && <option value="">Offline</option>}
@@ -537,8 +630,11 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 				<button className="ai-chat-clear-btn" onClick={clearChat} title="Clear chat history">Clear</button>
 			</div>
 
+			{/* Background activity ticker */}
+			<ActivityBar items={activities} />
+
 			{/* Messages */}
-			<div className="ai-chat-messages">
+			<div className="ai-chat-messages" ref={messagesRef}>
 				{ollamaStatus === 'offline' && (
 					<div className="ai-chat-offline">
 						<BishopIcon className="ai-chat-offline-icon" />
@@ -559,16 +655,17 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 							{SPLASH_MESSAGES[splashIdx]}
 						</p>
 						<p className="ai-chat-splash-hint">
-							<code>/write</code><code>/find</code><code>/summarize</code><code>/clip</code>
-							<code>/read</code><code>/person</code><code>/event</code><code>/idea</code>
+							<code>/write</code><code>/find</code><code>/clip</code><code>/research</code>
+							<code>/gaps</code><code>/briefing</code><code>/thesis</code><code>/person</code>
 						</p>
 					</div>
 				)}
 
 				{messages.map((msg, i) => {
 					const isLast    = i === lastMsgIndex;
-					const showCursor= isLast && streaming && msg.role === 'assistant' && msg.content === '' && !msg.toolChips?.length;
+					const showCursor= isLast && streaming && msg.role === 'assistant' && msg.content === '' && !msg.toolChips?.length && !agentStatus;
 					const showDots  = isLast && commandLoading && msg.role === 'assistant';
+					const showStatus= isLast && streaming && msg.role === 'assistant' && !!agentStatus;
 
 					return (
 						<div key={i} className={`ai-chat-message ai-chat-message--${msg.role}`}>
@@ -581,6 +678,9 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 										<div className="ai-chat-markdown-body-wrap">
 											{msg.toolChips && msg.toolChips.length > 0 && (
 												<ToolChipList chips={msg.toolChips} />
+											)}
+											{showStatus && (
+												<div className="vizier-agent-status">{agentStatus}</div>
 											)}
 											{showCursor ? (
 												<div className="ai-chat-markdown-body">
@@ -596,7 +696,10 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 									<p className="ai-chat-message-content">{msg.content}</p>
 								)}
 								{msg.role === 'assistant' && msg.content && !msg.findResults && !showDots && (
-									<CopyButton content={msg.content} />
+									<div className="vizier-msg-footer">
+										<CopyButton content={msg.content} />
+										{msg.model && <span className="vizier-msg-model" title="Model that produced this response">{msg.model}</span>}
+									</div>
 								)}
 							</div>
 						</div>
@@ -645,14 +748,24 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 						rows={1}
 						disabled={isLoading || ollamaStatus === 'offline'}
 					/>
-					<button
-						className="ai-chat-send-btn"
-						onClick={() => void handleSend()}
-						disabled={isLoading || !input.trim() || ollamaStatus === 'offline'}
-						title="Send"
-					>
-						➤
-					</button>
+					{streaming ? (
+						<button
+							className="ai-chat-send-btn ai-chat-send-btn--stop"
+							onClick={stopRun}
+							title="Stop"
+						>
+							■
+						</button>
+					) : (
+						<button
+							className="ai-chat-send-btn"
+							onClick={() => void handleSend()}
+							disabled={isLoading || !input.trim() || ollamaStatus === 'offline'}
+							title="Send"
+						>
+							➤
+						</button>
+					)}
 				</div>
 			</div>
 		</div>

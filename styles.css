@@ -1216,3 +1216,261 @@
 .vizier-field-error {
 	border-color: var(--text-error) !important;
 }
+/* ════════════════════════════════════════════════════════
+   Agent-era chat elements — tool chips, activity ticker,
+   status line, stop button, model badge.
+   Same monochrome language: black / white / grey only.
+   ════════════════════════════════════════════════════════ */
+
+/* ── Tool chips ─────────────────────────────────────── */
+
+.vizier-tool-chips {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 2px;
+}
+
+.vizier-tool-chip-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.vizier-tool-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	max-width: 100%;
+	width: fit-content;
+	padding: 4px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--v-border);
+	background: var(--v-raised);
+	color: var(--v-text);
+	font-size: 11px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	text-align: left;
+	cursor: default;
+	animation: vizierChipIn 0.18s ease-out;
+	transition: border-color 0.15s, background 0.15s;
+}
+
+@keyframes vizierChipIn {
+	from { opacity: 0; transform: translateY(3px); }
+	to   { opacity: 1; transform: translateY(0); }
+}
+
+.vizier-tool-chip--expandable {
+	cursor: pointer;
+}
+
+.vizier-tool-chip--expandable:hover {
+	border-color: var(--v-border-hover);
+	background: var(--v-surface);
+}
+
+.vizier-tool-chip--running {
+	border-color: var(--v-border-hover);
+	color: var(--v-white);
+}
+
+.vizier-tool-chip--running .vizier-tool-chip-icon {
+	display: inline-block;
+	animation: vizierSpin 0.9s linear infinite;
+}
+
+@keyframes vizierSpin {
+	to { transform: rotate(360deg); }
+}
+
+.vizier-tool-chip--done .vizier-tool-chip-icon {
+	color: var(--v-white);
+}
+
+.vizier-tool-chip--error {
+	border-color: var(--v-border-hover);
+	background: var(--v-dim);
+}
+
+.vizier-tool-chip--error .vizier-tool-chip-icon,
+.vizier-tool-chip--error .vizier-tool-chip-name {
+	color: var(--v-white);
+}
+
+.vizier-tool-chip-icon {
+	flex-shrink: 0;
+	font-size: 11px;
+	line-height: 1;
+}
+
+.vizier-tool-chip-name {
+	flex-shrink: 0;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--v-white);
+}
+
+.vizier-tool-chip-preview {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 320px;
+	color: var(--v-muted);
+}
+
+.vizier-tool-chip-ms {
+	flex-shrink: 0;
+	color: var(--v-faint);
+	font-size: 10px;
+}
+
+.vizier-tool-chip-caret {
+	flex-shrink: 0;
+	color: var(--v-faint);
+	font-size: 9px;
+}
+
+/* Expanded tool result panel */
+
+.vizier-tool-chip-output {
+	margin-left: 8px;
+	padding: 8px 12px;
+	border-left: 2px solid var(--v-border);
+	background: var(--v-bg);
+	border-radius: 0 6px 6px 0;
+	max-height: 260px;
+	overflow-y: auto;
+	font-size: 12px;
+	animation: vizierChipIn 0.15s ease-out;
+}
+
+.vizier-tool-chip-output::-webkit-scrollbar {
+	width: 6px;
+}
+
+.vizier-tool-chip-output::-webkit-scrollbar-thumb {
+	background: var(--v-border);
+	border-radius: 3px;
+}
+
+/* ── Agent status line ──────────────────────────────── */
+
+.vizier-agent-status {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11.5px;
+	font-style: italic;
+	color: var(--v-muted);
+	padding: 2px 0;
+	animation: vizierStatusPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes vizierStatusPulse {
+	0%, 100% { opacity: 0.55; }
+	50%       { opacity: 1; }
+}
+
+/* ── Background activity ticker ─────────────────────── */
+
+.vizier-activity-bar {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 6px 14px;
+	border-bottom: 1px solid var(--v-border);
+	background: var(--v-bg);
+	animation: vizierChipIn 0.18s ease-out;
+}
+
+.vizier-activity-item {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-size: 11px;
+	color: var(--v-muted);
+	min-width: 0;
+}
+
+.vizier-activity-item--running .vizier-activity-icon {
+	display: inline-block;
+	color: var(--v-white);
+	animation: vizierSpin 0.9s linear infinite;
+}
+
+.vizier-activity-item--done {
+	color: var(--v-text);
+}
+
+.vizier-activity-item--done .vizier-activity-icon {
+	color: var(--v-white);
+}
+
+.vizier-activity-item--error {
+	color: var(--v-white);
+}
+
+.vizier-activity-icon {
+	flex-shrink: 0;
+	font-size: 10px;
+	line-height: 1;
+}
+
+.vizier-activity-label {
+	flex-shrink: 0;
+	font-weight: 500;
+	letter-spacing: 0.01em;
+}
+
+.vizier-activity-detail {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--v-faint);
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	font-size: 10px;
+}
+
+/* ── Stop button ────────────────────────────────────── */
+
+.ai-chat-send-btn--stop {
+	background: transparent;
+	color: var(--v-white);
+	border: 1px solid var(--v-border-hover);
+	font-size: 11px;
+}
+
+.ai-chat-send-btn--stop:hover {
+	background: var(--v-dim);
+	border-color: var(--v-muted);
+}
+
+/* ── Message footer (copy + model badge) ────────────── */
+
+.vizier-msg-footer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.vizier-msg-model {
+	font-size: 9.5px;
+	font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+	color: var(--v-faint);
+	letter-spacing: 0.03em;
+	opacity: 0;
+	transition: opacity 0.2s;
+}
+
+.ai-chat-message:hover .vizier-msg-model {
+	opacity: 1;
+}
+
+/* ── Light theme adjustments ────────────────────────── */
+
+.theme-light .vizier-tool-chip,
+.theme-light .vizier-tool-chip-output,
+.theme-light .vizier-activity-bar {
+	background: var(--v-raised);
+}

@@ -41,6 +41,7 @@ import {
 } from './tool_execution';
 import { loadSkills, selectSkills, formatSkillsBlock, distillSkill } from '../skills/skills';
 import { verifyRun, isEffectfulRun } from './verifier';
+import { beginActivity, endActivity } from '../ui/activity';
 import {
 	ToolCallListSchema,
 	CompactionSummarySchema,
@@ -59,16 +60,19 @@ const COMPACTION_THRESH = 0.85;   // compact when >85% of context window used
 
 export interface AgentEventToken      { type: 'token';       content: string }
 export interface AgentEventToolStart  { type: 'tool_start';  name: string; params: Record<string, unknown> }
-export interface AgentEventToolResult { type: 'tool_result'; name: string; preview: string; ok: boolean; duration_ms: number }
+export interface AgentEventToolResult { type: 'tool_result'; name: string; preview: string; output: string; ok: boolean; duration_ms: number }
 export interface AgentEventRoundEnd   { type: 'round_end';   round: number }
 export interface AgentEventError      { type: 'error';       message: string }
+/** Run metadata: which model is answering. Emitted once at run start. */
+export interface AgentEventMeta       { type: 'meta';        model: string }
 
 export type AgentEvent =
 	| AgentEventToken
 	| AgentEventToolStart
 	| AgentEventToolResult
 	| AgentEventRoundEnd
-	| AgentEventError;
+	| AgentEventError
+	| AgentEventMeta;
 
 // ── Conversation message (richer than LLMMessage) ─────────────────────────
 
@@ -216,6 +220,7 @@ export async function runAgentLoop(
 	// Discover context window for this model
 	const primaryModel = cfg.roles.default.models[0] ?? 'gemma3:4b';
 	const contextWindow = await getContextWindow(cfg.ollamaUrl, primaryModel);
+	onEvent({ type: 'meta', model: primaryModel });
 
 	// Assemble the conversation so far
 	let messages: LLMMessage[] = [
@@ -295,8 +300,9 @@ export async function runAgentLoop(
 			const validCalls = toolList.calls.filter(call => {
 				const err = validateParams(call);
 				if (err) {
-					toolResultLines.push(`TOOL ${call.name} ERROR: ${err.error}${err.missing ? ` — missing params: ${err.missing.join(', ')}` : ''}`);
-					onEvent({ type: 'tool_result', name: call.name, preview: `Error: ${err.error}`, ok: false, duration_ms: 0 });
+					const msg = `${err.error}${err.missing ? ` — missing params: ${err.missing.join(', ')}` : ''}`;
+					toolResultLines.push(`TOOL ${call.name} ERROR: ${msg}`);
+					onEvent({ type: 'tool_result', name: call.name, preview: `Error: ${err.error}`, output: msg, ok: false, duration_ms: 0 });
 					return false;
 				}
 				return true;
@@ -308,7 +314,7 @@ export async function runAgentLoop(
 				const result = await executeTool(call, app, settings);
 
 				const preview = result.output.slice(0, 120).replace(/\n/g, ' ');
-				onEvent({ type: 'tool_result', name: call.name, preview, ok: result.ok, duration_ms: result.duration_ms });
+				onEvent({ type: 'tool_result', name: call.name, preview, output: result.output.slice(0, 4000), ok: result.ok, duration_ms: result.duration_ms });
 
 				if (!toolsUsed.includes(call.name)) toolsUsed.push(call.name);
 
@@ -353,9 +359,14 @@ export async function runAgentLoop(
 
 		// ── Verifier (Phase 5): one corrective round on effectful runs ─
 		if (isEffectfulRun(toolsUsed)) {
+			beginActivity('verify', 'Verifying the work');
 			try {
 				const verdict = await verifyRun(cfg, userMessage, transcript());
 				verifierResult = verdict.result;
+				endActivity('verify', verdict.result !== 'BLOCKED',
+					verdict.result === 'SUCCESS' ? 'Work verified'
+						: verdict.result === 'RETRY' ? 'Issues found — correcting'
+						: 'Verifier: blocked');
 
 				if (verdict.result === 'RETRY' && verdict.issues.length > 0) {
 					messages.push({
@@ -376,7 +387,7 @@ export async function runAgentLoop(
 						if (validateParams(call)) continue;
 						onEvent({ type: 'tool_start', name: call.name, params: call.params });
 						const r = await executeTool(call, app, settings);
-						onEvent({ type: 'tool_result', name: call.name, preview: r.output.slice(0, 120).replace(/\n/g, ' '), ok: r.ok, duration_ms: r.duration_ms });
+						onEvent({ type: 'tool_result', name: call.name, preview: r.output.slice(0, 120).replace(/\n/g, ' '), output: r.output.slice(0, 4000), ok: r.ok, duration_ms: r.duration_ms });
 						if (!toolsUsed.includes(call.name)) toolsUsed.push(call.name);
 						fixResults.push(`TOOL ${call.name} ${r.ok ? 'SUCCESS' : 'ERROR'}:\n${r.output.slice(0, TOOL_RESULT_CAP)}`);
 					}
@@ -389,13 +400,21 @@ export async function runAgentLoop(
 						invalidateVaultCache();
 					}
 				}
-			} catch { /* verification is best-effort — never fail the run over it */ }
+			} catch { endActivity('verify', true, undefined, true); /* verification is best-effort */ }
 		}
 
 		// ── Skill distillation (Phase 5): learn from multi-step successes ─
 		if (round >= 2 && toolsUsed.length >= 2) {
 			const t = transcript();
-			void distillSkill(app, settings, t, toolsUsed);
+			beginActivity('skill', 'Distilling a skill from this session');
+			void distillSkill(app, settings, t, toolsUsed).then(notePath => {
+				if (notePath) {
+					const name = notePath.replace(/^.*\//, '').replace(/\.md$/, '');
+					endActivity('skill', true, `Skill learned: ${name}`);
+				} else {
+					endActivity('skill', true, undefined, true); // nothing reusable — vanish quietly
+				}
+			}).catch(() => endActivity('skill', true, undefined, true));
 		}
 
 	} catch (err) {

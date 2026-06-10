@@ -16,6 +16,7 @@ import { MemoryManager } from './memory/memory_manager';
 import { VaultIndex } from './memory/vault_index';
 import { runContradictionScan } from './epistemic/contradiction_engine';
 import { schedulerTick, TICK_MS, STARTUP_DELAY } from './scheduler';
+import { beginActivity, updateActivity, endActivity } from './ui/activity';
 
 // ── Notice-based message helpers ───────────────────────────────────────────
 
@@ -68,8 +69,18 @@ export default class VizierPlugin extends Plugin {
 
 			// Incremental vault re-index in the background after load
 			this.app.workspace.onLayoutReady(() => {
-				void this.vaultIndex?.reindexVault(this.app, this.settings)
-					.catch((err: unknown) => console.warn('[Vizier] background vault reindex failed:', err));
+				beginActivity('reindex', 'Updating vault index');
+				void this.vaultIndex?.reindexVault(this.app, this.settings, (done, total) => {
+					if (done % 20 === 0) updateActivity('reindex', `${done}/${total} notes`);
+				})
+					.then(r => {
+						if (r.chunksAdded > 0) endActivity('reindex', true, `Vault index updated (${r.chunksAdded} new chunks)`);
+						else endActivity('reindex', true, undefined, true); // nothing changed — vanish quietly
+					})
+					.catch((err: unknown) => {
+						endActivity('reindex', false, 'Vault index failed — check embedding model');
+						console.warn('[Vizier] background vault reindex failed:', err);
+					});
 			});
 
 			// Keep vault index up to date on file changes
@@ -144,13 +155,18 @@ export default class VizierPlugin extends Plugin {
 					return;
 				}
 				new Notice('Rebuilding vault index… this may take a moment.');
-				void this.vaultIndex.reindexVault(this.app, this.settings)
+				beginActivity('reindex', 'Rebuilding vault index');
+				void this.vaultIndex.reindexVault(this.app, this.settings, (done, total) => {
+					if (done % 10 === 0) updateActivity('reindex', `${done}/${total} notes`);
+				})
 					.then((r) => {
+						endActivity('reindex', r.embedFailures === 0, `Vault index rebuilt (${r.chunksAdded} chunks added)`);
 						const stats = this.vaultIndex?.getStats();
 						const failNote = r.embedFailures > 0 ? ` (${r.embedFailures} chunks failed to embed)` : '';
 						new Notice(`Vault index rebuilt: ${stats?.total_chunks ?? 0} chunks from ${stats?.total_files ?? 0} notes.${failNote}`, 8000);
 					})
 					.catch((err: unknown) => {
+						endActivity('reindex', false, 'Vault index failed');
 						new Notice(`Vault index failed: ${err instanceof Error ? err.message : String(err)}`, 10_000);
 					});
 			},

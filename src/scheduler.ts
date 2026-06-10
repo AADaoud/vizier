@@ -25,6 +25,7 @@ import { runIntake, parseFeedUrls } from './intake/feeds';
 import { generateBriefing } from './intake/briefing';
 import { runContradictionScan } from './epistemic/contradiction_engine';
 import { getAllClaims } from './epistemic/claims';
+import { beginActivity, endActivity } from './ui/activity';
 
 export const TICK_MS        = 15 * 60 * 1000; // check every 15 min
 export const STARTUP_DELAY  = 5 * 60 * 1000;  // let reindex/capability warmup finish first
@@ -79,36 +80,46 @@ export async function schedulerTick(
 		// 1. Intake
 		if (settings.features.intake && parseFeedUrls(settings.feedUrls ?? '').length > 0
 			&& (force || state.lastIntake !== today)) {
+			beginActivity('sched-intake', 'Daily intake: triaging feeds');
 			try {
 				const r = await runIntake(app, settings, pluginDir, memoryManager);
 				state.lastIntake = today;
 				saveState(pluginDir, state);
 				ran.push(`intake (${r.kept} kept)`);
+				endActivity('sched-intake', true, `Intake done — ${r.kept} item(s) kept`);
 				if (r.kept > 0) new Notice(`Vizier: ${r.kept} new intake item(s) in your inbox.`, 6000);
-			} catch { /* feeds down — retry next tick tomorrow */ }
+			} catch { endActivity('sched-intake', false, 'Intake failed — will retry tomorrow'); }
 		}
 
 		// 2. Briefing
 		if (settings.features.briefing && (force || state.lastBriefing !== today)) {
+			beginActivity('sched-briefing', 'Writing daily briefing');
 			try {
 				const notePath = await generateBriefing(app, settings, memoryManager);
 				state.lastBriefing = today;
 				saveState(pluginDir, state);
 				ran.push('briefing');
 				const name = notePath.replace(/^.*\//, '').replace(/\.md$/, '');
+				endActivity('sched-briefing', true, `Briefing ready: ${name}`);
 				new Notice(`Vizier: daily briefing ready — ${name}`, 6000);
-			} catch { /* model unavailable — try again tomorrow */ }
+			} catch { endActivity('sched-briefing', false, 'Briefing failed — will retry tomorrow'); }
 		}
 
 		// 3. Contradiction scan (only when there are claims to scan)
 		if ((force || state.lastContradiction !== today) && getAllClaims(app).length >= 2) {
+			beginActivity('sched-contra', 'Scanning claims for contradictions');
 			try {
 				const r = await runContradictionScan(app, settings, pluginDir);
 				state.lastContradiction = today;
 				saveState(pluginDir, state);
 				ran.push(`contradiction scan (${r.flagged} flagged)`);
-				if (r.flagged > 0) new Notice(`Vizier: ${r.flagged} contradiction(s) flagged for review.`, 8000);
-			} catch { /* skip */ }
+				if (r.flagged > 0) {
+					endActivity('sched-contra', true, `${r.flagged} contradiction(s) flagged`);
+					new Notice(`Vizier: ${r.flagged} contradiction(s) flagged for review.`, 8000);
+				} else {
+					endActivity('sched-contra', true, 'No contradictions found');
+				}
+			} catch { endActivity('sched-contra', false, 'Contradiction scan failed'); }
 		}
 	} finally {
 		_running = false;
