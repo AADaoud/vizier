@@ -322,6 +322,78 @@ Requires the Vizier server to be running.
 Saves transcript to the transcripts folder.`,
 	},
 
+	// ── Claims & epistemic graph (Phase 3) ───────────────────────────────
+
+	{
+		name: 'add_claim',
+		description: 'Record a discrete factual claim on a note (stored in frontmatter).',
+		params: {
+			note_name:  { type: 'string', description: 'Note to attach the claim to (defaults to active note).' },
+			text:       { type: 'string', description: 'The claim as a single checkable assertion.' },
+			confidence: { type: 'number', description: 'Confidence 0-1 (default 0.7).' },
+			sources:    { type: 'array', description: 'Sources backing the claim (URLs or note names).', items: { type: 'string' } },
+		},
+		required: ['text'],
+		keywords: ['claim', 'assert', 'fact', 'record that', 'evidence'],
+		doc: `add_claim — Attach a machine-readable claim to a note.
+A claim is ONE checkable assertion, not a summary. Keep it under 25 words.
+Uncited claims are flagged by audits — pass sources when you have them.
+Claims power the contradiction engine: write them for anything load-bearing.`,
+	},
+
+	{
+		name: 'cite_claim',
+		description: 'Attach a source to an existing claim on a note.',
+		params: {
+			note_name: { type: 'string', description: 'Note holding the claim (defaults to active note).' },
+			claim_id:  { type: 'string', description: 'Claim id (from list_claims, e.g. c_xxx).' },
+			source:    { type: 'string', description: 'URL or note name that backs the claim.' },
+		},
+		required: ['claim_id', 'source'],
+		keywords: ['cite', 'source', 'citation', 'back up', 'reference'],
+		doc: `cite_claim — Add a source to a claim.
+Use list_claims first to find the claim_id.`,
+	},
+
+	{
+		name: 'contest_claim',
+		description: 'Mark a claim as contested with a reason (e.g. it conflicts with new evidence).',
+		params: {
+			note_name: { type: 'string', description: 'Note holding the claim (defaults to active note).' },
+			claim_id:  { type: 'string', description: 'Claim id to contest.' },
+			reason:    { type: 'string', description: 'Why the claim is now in doubt.' },
+		},
+		required: ['claim_id', 'reason'],
+		keywords: ['contest', 'dispute', 'doubt', 'challenge claim', 'wrong'],
+		doc: `contest_claim — Flag a claim as contested.
+Does NOT delete the claim — it stays visible with contested status so the
+user can resolve it. Use when evidence conflicts, not for mere uncertainty.`,
+	},
+
+	{
+		name: 'list_claims',
+		description: 'List the claims recorded on a note.',
+		params: {
+			note_name: { type: 'string', description: 'Note to inspect (defaults to active note).' },
+		},
+		required: [],
+		keywords: ['claims', 'list claims', 'what claims', 'assertions'],
+		doc: `list_claims — Show a note's claims with ids, status, confidence, and sources.
+Run this before cite_claim or contest_claim to get the claim_id.`,
+	},
+
+	{
+		name: 'scan_contradictions',
+		description: 'Run the contradiction engine: find claims across the vault that conflict with each other.',
+		params: {},
+		required: [],
+		keywords: ['contradiction', 'contradictions', 'conflicts', 'scan', 'inconsistencies', 'tension'],
+		doc: `scan_contradictions — Cross-vault contradiction scan over recorded claims.
+Embeds all claims, finds semantically close cross-note pairs, and LLM-checks
+each pair. Flags land as notes in the contradictions folder — never modifies
+user notes. Only claims added via add_claim are scanned (prose is not).`,
+	},
+
 	// ── Note utilities ────────────────────────────────────────────────────
 
 	{

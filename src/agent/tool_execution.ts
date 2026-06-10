@@ -17,9 +17,7 @@ import type { AIAgentSettings } from '../settings';
 import { getToolByName } from './tool_schemas';
 import type { ToolCall } from '../schemas/index';
 import {
-	executeWrite,
 	executeClip,
-	executeFind,
 	type CommandConfig,
 } from '../commands/slashCommands';
 import {
@@ -38,20 +36,33 @@ import {
 	executeStandardize,
 } from '../commands/miscCommands';
 import {
-	mapReduceSummarize,
-} from '../utils/chunking';
-import {
 	findEntityByName,
 	getLinkGraph,
-	getNotesModifiedSince,
 } from '../utils/vaultQuery';
 import {
 	sanitizeFilename,
-	buildYamlTags,
-	today,
 	ensureFolder,
 	deduplicatePath,
 } from '../utils/noteBuilder';
+import type { VaultIndex } from '../memory/vault_index';
+import {
+	findNote,
+	getClaims,
+	addClaim,
+	citeClaim,
+	contestClaim,
+	formatClaims,
+} from '../epistemic/claims';
+
+// ── Shared agent context (set once by the plugin on load) ─────────────────
+// Tools that need the vault index or plugin dir get them via these setters
+// rather than threading extra params through every handler signature.
+
+let _vaultIndex: VaultIndex | null = null;
+let _pluginDir = '';
+
+export function setAgentVaultIndex(vi: VaultIndex | null): void { _vaultIndex = vi; }
+export function setAgentPluginDir(dir: string): void { _pluginDir = dir; }
 
 // ── Message capture adapter ───────────────────────────────────────────────
 // Existing commands write to addMessage/replaceMessage callbacks.
@@ -87,11 +98,6 @@ function num(params: Record<string, unknown>, key: string, fallback: number): nu
 	return typeof v === 'number' ? v : fallback;
 }
 
-function bool(params: Record<string, unknown>, key: string, fallback = false): boolean {
-	const v = params[key];
-	return typeof v === 'boolean' ? v : fallback;
-}
-
 // ── Individual tool handlers ──────────────────────────────────────────────
 
 async function handleVaultSearch(
@@ -110,6 +116,19 @@ async function handleVaultSearch(
 		replaceMessage: () => {},
 		addFindResults: (_q: string, _c: unknown[]) => {},
 	};
+
+	// Hybrid index first: 0.7×vector + 0.3×BM25 catches semantic matches that
+	// share no keywords with the query. Falls through to keyword scan when the
+	// index is empty (e.g. embeddings unavailable).
+	if (_vaultIndex && _vaultIndex.getStats().total_chunks > 0) {
+		try {
+			let results = await _vaultIndex.search(query, settings, Math.min(limit, 20));
+			if (folder) results = results.filter(r => r.chunk.path.startsWith(folder + '/'));
+			if (results.length > 0) {
+				return `Hybrid search results for "${query}":\n\n${_vaultIndex.formatResults(results)}`;
+			}
+		} catch { /* embedding hiccup — fall through to keyword scan */ }
+	}
 
 	// Re-implement find directly so we can return a structured string
 	const files = app.vault.getMarkdownFiles()
@@ -405,7 +424,94 @@ async function handleBridge(params: Record<string, unknown>, app: App, settings:
 		if (queue.length > 500) break; // guard against enormous graphs
 	}
 
-	return `No direct link path found between [[${entityA}]] and [[${entityB}]] in the Human Network graph.\n\n*Embedding-space bridge (Phase 2) will find indirect connections via semantic similarity.*`;
+	// No wikilink path — fall back to embedding space: notes semantically close
+	// to BOTH endpoints are candidate conceptual connectors.
+	if (_vaultIndex && _vaultIndex.getStats().total_chunks > 0) {
+		const nearA = _vaultIndex.semanticNeighbors(fileA.path, 15);
+		const nearB = _vaultIndex.semanticNeighbors(fileB.path, 15);
+		const scoresB = new Map(nearB.map(n => [n.path, n.score]));
+		const shared = nearA
+			.filter(n => scoresB.has(n.path))
+			.map(n => ({ ...n, combined: n.score + (scoresB.get(n.path) ?? 0) }))
+			.sort((a, b) => b.combined - a.combined)
+			.slice(0, 5);
+
+		if (shared.length > 0) {
+			const lines = shared.map(s => `- [[${s.basename}]] (affinity ${(s.combined / 2).toFixed(2)})`);
+			return [
+				`No direct wikilink path between [[${entityA}]] and [[${entityB}]], but these notes are semantically close to BOTH — likely conceptual bridges:`,
+				'',
+				...lines,
+				'',
+				'Consider reading these and adding explicit links if the connection holds.',
+			].join('\n');
+		}
+	}
+
+	return `No direct link path found between [[${entityA}]] and [[${entityB}]] in the Human Network graph, and no shared semantic neighbours in the vault index.`;
+}
+
+// ── Claims (Phase 3) ──────────────────────────────────────────────────────
+
+async function handleAddClaim(params: Record<string, unknown>, app: App): Promise<string> {
+	const noteName   = str(params, 'note_name');
+	const text       = str(params, 'text');
+	const confidence = num(params, 'confidence', 0.7);
+	const sourcesRaw = params['sources'];
+	const sources    = Array.isArray(sourcesRaw) ? sourcesRaw.filter((s): s is string => typeof s === 'string') : [];
+	if (!text) return 'ERROR: add_claim requires a text parameter.';
+
+	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
+	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+
+	const claim = await addClaim(app, file, text, confidence, sources);
+	return `Added claim \`${claim.id}\` to [[${file.basename}]]: "${claim.text}"${sources.length ? '' : ' (uncited — consider cite_claim once a source is known)'}`;
+}
+
+async function handleCiteClaim(params: Record<string, unknown>, app: App): Promise<string> {
+	const noteName = str(params, 'note_name');
+	const claimId  = str(params, 'claim_id');
+	const source   = str(params, 'source');
+	if (!claimId || !source) return 'ERROR: cite_claim requires claim_id and source parameters.';
+
+	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
+	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+
+	const updated = await citeClaim(app, file, claimId, source);
+	if (!updated) return `Claim \`${claimId}\` not found in [[${file.basename}]]. Use list_claims to see its claims.`;
+	return `Cited claim \`${claimId}\` in [[${file.basename}]] — sources now: ${updated.sources.join('; ')}`;
+}
+
+async function handleContestClaim(params: Record<string, unknown>, app: App): Promise<string> {
+	const noteName = str(params, 'note_name');
+	const claimId  = str(params, 'claim_id');
+	const reason   = str(params, 'reason');
+	if (!claimId || !reason) return 'ERROR: contest_claim requires claim_id and reason parameters.';
+
+	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
+	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+
+	const updated = await contestClaim(app, file, claimId, reason);
+	if (!updated) return `Claim \`${claimId}\` not found in [[${file.basename}]]. Use list_claims to see its claims.`;
+	return `Marked claim \`${claimId}\` in [[${file.basename}]] as CONTESTED: ${reason}`;
+}
+
+async function handleListClaims(params: Record<string, unknown>, app: App): Promise<string> {
+	const noteName = str(params, 'note_name');
+	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
+	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+	return `Claims on [[${file.basename}]]:\n\n${formatClaims(getClaims(app, file))}`;
+}
+
+async function handleScanContradictions(
+	params: Record<string, unknown>,
+	app: App,
+	settings: AIAgentSettings
+): Promise<string> {
+	if (!_pluginDir) return 'Contradiction scan unavailable (plugin dir not initialised).';
+	const { runContradictionScan } = await import('../epistemic/contradiction_engine');
+	const r = await runContradictionScan(app, settings, _pluginDir);
+	return `Contradiction scan complete: ${r.claims} claims, ${r.candidates} candidate pairs, ${r.checked} checked, ${r.flagged} contradiction(s) flagged${r.flagged > 0 ? ` in ${settings.contradictionsFolder}` : ''}.`;
 }
 
 async function handleTimeline(
@@ -734,6 +840,21 @@ export async function executeTool(
 			case 'transcribe':
 				output = await handleTranscribe(call.params, app, settings, cfg);
 				break;
+			case 'add_claim':
+				output = await handleAddClaim(call.params, app);
+				break;
+			case 'cite_claim':
+				output = await handleCiteClaim(call.params, app);
+				break;
+			case 'contest_claim':
+				output = await handleContestClaim(call.params, app);
+				break;
+			case 'list_claims':
+				output = await handleListClaims(call.params, app);
+				break;
+			case 'scan_contradictions':
+				output = await handleScanContradictions(call.params, app, settings);
+				break;
 			default:
 				output = `Unknown tool: "${call.name}". Available tools: ${getAllToolNames().join(', ')}.`;
 		}
@@ -749,5 +870,6 @@ function getAllToolNames(): string[] {
 	return ['vault_search', 'read_note', 'write_note', 'edit_note', 'create_entity',
 		'link_entities', 'wiki_lookup', 'fetch_url', 'summarize_media', 'bridge',
 		'timeline', 'contradict_note', 'audit_sources', 'recluster', 'thesis',
-		'socratic', 'reflection', 'standardize_folder', 'ingest_document', 'transcribe'];
+		'socratic', 'reflection', 'standardize_folder', 'ingest_document', 'transcribe',
+		'add_claim', 'cite_claim', 'contest_claim', 'list_claims', 'scan_contradictions'];
 }

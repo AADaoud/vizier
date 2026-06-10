@@ -14,11 +14,8 @@
  *   recordRun({ kind: 'agent', model: 'gemma3:12b', ok: true, duration_ms: 1200 });
  */
 
-// Use Node.js fs — available in Obsidian's Electron environment.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const fs = require('fs') as typeof import('fs');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const path = require('path') as typeof import('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

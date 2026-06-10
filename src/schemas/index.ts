@@ -160,13 +160,13 @@ export const ClaimListSchema = { // _v1
 	required: ['claims'],
 } as const;
 
-/** Detected contradiction between two claims. */
-export const ContradictionReportSchema = { // _v1
+/** Detected contradiction between two claims. tension_type 'none' = no contradiction. */
+export const ContradictionReportSchema = { // _v2: added 'none' so the scan can clear candidate pairs
 	type: 'object',
 	properties: {
 		claim_a:      { type: 'string' },
 		claim_b:      { type: 'string' },
-		tension_type: { type: 'string', enum: ['direct_negation', 'incompatible_dates', 'conflicting_attribution', 'scope_mismatch', 'other'] },
+		tension_type: { type: 'string', enum: ['none', 'direct_negation', 'incompatible_dates', 'conflicting_attribution', 'scope_mismatch', 'other'] },
 		severity:     { type: 'string', enum: ['low', 'medium', 'high'] },
 		explanation:  { type: 'string' },
 	},
@@ -316,7 +316,7 @@ export interface ClaimList {
 export interface ContradictionReport {
 	claim_a: string;
 	claim_b: string;
-	tension_type: 'direct_negation' | 'incompatible_dates' | 'conflicting_attribution' | 'scope_mismatch' | 'other';
+	tension_type: 'none' | 'direct_negation' | 'incompatible_dates' | 'conflicting_attribution' | 'scope_mismatch' | 'other';
 	severity: 'low' | 'medium' | 'high';
 	explanation: string;
 }

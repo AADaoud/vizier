@@ -18,10 +18,8 @@
  * as a note in the user's workspace.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const fs   = require('fs')   as typeof import('fs');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const path = require('path') as typeof import('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 import type { App, TFile } from 'obsidian';
 import { buildLLMConfig, getEmbedding, cosineSimilarity } from '../llm_core';
@@ -313,6 +311,36 @@ export class VaultIndex {
 				return { chunk, score: norm, vector_score: 0, bm25_score: norm };
 			})
 			.filter(r => r.score >= threshold)
+			.sort((a, b) => b.score - a.score)
+			.slice(0, k);
+	}
+
+	/**
+	 * Notes semantically nearest to a given note, scored against the centroid
+	 * of its chunk vectors. Pure vector math over the stored index — no
+	 * embedding calls, so it's cheap enough for interactive use.
+	 */
+	semanticNeighbors(notePath: string, k = 8): Array<{ path: string; basename: string; score: number }> {
+		const own = this.chunks.filter(c => c.path === notePath && c.vector.length > 0);
+		if (own.length === 0) return [];
+		const dim = own[0]?.vector.length ?? 0;
+
+		const centroid = new Array<number>(dim).fill(0);
+		for (const c of own) {
+			for (let i = 0; i < dim; i++) centroid[i] = (centroid[i] ?? 0) + (c.vector[i] ?? 0);
+		}
+		for (let i = 0; i < dim; i++) centroid[i] = (centroid[i] ?? 0) / own.length;
+
+		const best = new Map<string, { basename: string; score: number }>();
+		for (const c of this.chunks) {
+			if (c.path === notePath || c.vector.length !== dim) continue;
+			const s = cosineSimilarity(centroid, c.vector);
+			const prev = best.get(c.path);
+			if (!prev || s > prev.score) best.set(c.path, { basename: c.basename, score: s });
+		}
+
+		return [...best.entries()]
+			.map(([p, v]) => ({ path: p, basename: v.basename, score: v.score }))
 			.sort((a, b) => b.score - a.score)
 			.slice(0, k);
 	}

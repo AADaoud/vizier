@@ -198,6 +198,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		description: 'Show Vizier run statistics and model usage from the trace log',
 		template: '/runstats',
 	},
+	{
+		id: 'gaps',
+		label: '/gaps',
+		description: 'Analyze the vault for missing themes, entities, and readings',
+		template: '/gaps ',
+	},
 ];
 
 // --- helpers ---

@@ -8,11 +8,13 @@ import { executeStandardize } from './commands/miscCommands';
 import { executeSocratic, executeReflection, executeFreewrite, executeSources } from './commands/reflectionCommands';
 import { promptModal } from './ui/PromptModal';
 import { mapReduceSummarize } from './utils/chunking';
-import { initTraces, formatRunStats } from './traces';
+import { initTraces } from './traces';
 import { warmCapabilities, buildLLMConfig } from './llm_core';
 import { invalidateVaultCache } from './agent/prompt_builder';
+import { setAgentVaultIndex, setAgentPluginDir } from './agent/tool_execution';
 import { MemoryManager } from './memory/memory_manager';
 import { VaultIndex } from './memory/vault_index';
+import { runContradictionScan } from './epistemic/contradiction_engine';
 
 // ── Notice-based message helpers ───────────────────────────────────────────
 
@@ -53,10 +55,14 @@ export default class VizierPlugin extends Plugin {
 		// ── Phase 0: warm capability cache for all configured models ──
 		void warmCapabilities(buildLLMConfig(this.settings));
 
+		// ── Phase 3: give agent tools access to shared context ────────
+		setAgentPluginDir(pluginDir);
+
 		// ── Phase 2: initialise memory and vault index ─────────────────
 		if (this.settings.features.memory && pluginDir) {
 			this.memoryManager = new MemoryManager(pluginDir);
 			this.vaultIndex    = new VaultIndex(pluginDir);
+			setAgentVaultIndex(this.vaultIndex);
 
 			// Incremental vault re-index in the background after load
 			this.app.workspace.onLayoutReady(() => {
@@ -120,18 +126,19 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Phase 0: run stats ─────────────────────────────────────────
 		this.addCommand({
-			id: 'vizier-run-stats',
+			id: 'run-stats',
 			name: 'Show run stats',
 			callback: () => { void this.activateChatView('/runstats'); },
 		});
 
 		// ── Phase 2: rebuild vault index ───────────────────────────────
 		this.addCommand({
-			id: 'vizier-reindex-vault',
-			name: 'Re-index vault (rebuild vector search index)',
+			id: 'reindex-vault',
+			name: 'Rebuild vault search index',
 			callback: () => {
 				if (!this.vaultIndex) {
-					new Notice('Vault index is disabled. Enable Memory in Vizier settings.');
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
+				new Notice('Vault index is disabled. Enable memory in Vizier settings.');
 					return;
 				}
 				new Notice('Rebuilding vault index… this may take a moment.');
@@ -143,6 +150,23 @@ export default class VizierPlugin extends Plugin {
 					})
 					.catch((err: unknown) => {
 						new Notice(`Vault index failed: ${err instanceof Error ? err.message : String(err)}`, 10_000);
+					});
+			},
+		});
+
+		// ── Phase 3: contradiction scan ────────────────────────────────
+		this.addCommand({
+			id: 'contradiction-scan',
+			name: 'Scan vault claims for contradictions',
+			callback: () => {
+				if (!pluginDir) { new Notice('Plugin directory unavailable.'); return; }
+				new Notice('Scanning claims for contradictions…');
+				void runContradictionScan(this.app, this.settings, pluginDir)
+					.then(r => {
+						new Notice(`Contradiction scan: ${r.claims} claims, ${r.checked} pairs checked, ${r.flagged} flagged.`, 8000);
+					})
+					.catch((err: unknown) => {
+						new Notice(`Contradiction scan failed: ${err instanceof Error ? err.message : String(err)}`, 10_000);
 					});
 			},
 		});

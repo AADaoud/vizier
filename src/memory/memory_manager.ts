@@ -15,10 +15,8 @@
  * Storage: a single memories.json file in the plugin directory.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const fs   = require('fs')   as typeof import('fs');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const path = require('path') as typeof import('path');
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { buildLLMConfig, callStructured } from '../llm_core';
 import {

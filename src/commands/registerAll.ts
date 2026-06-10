@@ -14,6 +14,7 @@ import {
 	executeThesis, executeReflection, executeFreewrite,
 } from './reflectionCommands';
 import { executeIngest, executeTranscribe } from './ingestCommands';
+import { executeGaps } from './gapsCommand';
 
 register('write', (args, ctx) =>
 	executeWrite(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.aiNotesFolder)
@@ -129,3 +130,7 @@ register('runstats', (_args, ctx) => {
 	ctx.addMessage('assistant', formatRunStats(200));
 	return Promise.resolve();
 });
+
+register('gaps', (args, ctx) =>
+	executeGaps(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.settings)
+);
