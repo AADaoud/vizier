@@ -39,6 +39,8 @@ import {
 	executeTool,
 	validateParams,
 } from './tool_execution';
+import { loadSkills, selectSkills, formatSkillsBlock, distillSkill } from '../skills/skills';
+import { verifyRun, isEffectfulRun } from './verifier';
 import {
 	ToolCallListSchema,
 	CompactionSummarySchema,
@@ -184,6 +186,8 @@ export async function runAgentLoop(
 	const toolsUsed: string[] = [];
 	let   ok         = true;
 	let   errorMsg   = '';
+	let   verifierResult: string | undefined;
+	let   anyFallback = false;
 
 	// Collect recent user messages for keyword-based tool selection
 	const recentUserMsgs = [
@@ -192,6 +196,13 @@ export async function runAgentLoop(
 	];
 	const selectedTools = selectTools(recentUserMsgs);
 
+	// Learned skills matching this request (Phase 5)
+	let skillsMarkdown = '';
+	try {
+		const matched = selectSkills(await loadSkills(app, settings), recentUserMsgs);
+		skillsMarkdown = formatSkillsBlock(matched);
+	} catch { /* skills folder unreadable — proceed without */ }
+
 	// Build layered system prompt
 	const systemMessages = await buildSystemPrompt({
 		app,
@@ -199,6 +210,7 @@ export async function runAgentLoop(
 		selectedTools,
 		memories,
 		includeActiveNote: true,
+		skillsMarkdown,
 	});
 
 	// Discover context window for this model
@@ -259,6 +271,7 @@ export async function runAgentLoop(
 					toolList = { calls: [], done: true };
 					usedFallback = true;
 				}
+				if (usedFallback) anyFallback = true;
 			}
 
 			onEvent({ type: 'round_end', round });
@@ -333,6 +346,58 @@ export async function runAgentLoop(
 
 		invalidateVaultCache(); // vault may have changed if notes were written
 
+		const transcript = () => messages
+			.filter(m => m.role !== 'system')
+			.map(m => `${m.role}: ${m.content}`)
+			.join('\n\n');
+
+		// ── Verifier (Phase 5): one corrective round on effectful runs ─
+		if (isEffectfulRun(toolsUsed)) {
+			try {
+				const verdict = await verifyRun(cfg, userMessage, transcript());
+				verifierResult = verdict.result;
+
+				if (verdict.result === 'RETRY' && verdict.issues.length > 0) {
+					messages.push({
+						role: 'user',
+						content: `[VERIFIER] The work has unresolved issues:\n${verdict.issues.map(i => `- ${i}`).join('\n')}\nFix them now with the necessary tool calls. Do not apologise — just fix.`,
+					});
+
+					// Teacher escalation: the corrective dispatch goes to the
+					// research role (stronger model than the one that erred)
+					const fix = await callStructured<ToolCallList>(
+						cfg, 'research',
+						ToolCallListSchema as Record<string, unknown>,
+						messages, { temperature: 0 }
+					);
+
+					const fixResults: string[] = [];
+					for (const call of fix.calls.slice(0, 5)) {
+						if (validateParams(call)) continue;
+						onEvent({ type: 'tool_start', name: call.name, params: call.params });
+						const r = await executeTool(call, app, settings);
+						onEvent({ type: 'tool_result', name: call.name, preview: r.output.slice(0, 120).replace(/\n/g, ' '), ok: r.ok, duration_ms: r.duration_ms });
+						if (!toolsUsed.includes(call.name)) toolsUsed.push(call.name);
+						fixResults.push(`TOOL ${call.name} ${r.ok ? 'SUCCESS' : 'ERROR'}:\n${r.output.slice(0, TOOL_RESULT_CAP)}`);
+					}
+
+					if (fixResults.length > 0) {
+						messages.push({ role: 'user', content: fixResults.join('\n\n---\n\n') + '\n\nBriefly tell the user what was corrected.' });
+						onEvent({ type: 'token', content: '\n\n' });
+						await callStreaming(cfg, 'default', messages, { temperature: 0.7 },
+							token => onEvent({ type: 'token', content: token }));
+						invalidateVaultCache();
+					}
+				}
+			} catch { /* verification is best-effort — never fail the run over it */ }
+		}
+
+		// ── Skill distillation (Phase 5): learn from multi-step successes ─
+		if (round >= 2 && toolsUsed.length >= 2) {
+			const t = transcript();
+			void distillSkill(app, settings, t, toolsUsed);
+		}
+
 	} catch (err) {
 		ok = false;
 		errorMsg = err instanceof Error ? err.message : String(err);
@@ -346,6 +411,8 @@ export async function runAgentLoop(
 			ok,
 			error: errorMsg || undefined,
 			rounds: round,
+			verifier: verifierResult,
+			fallback: anyFallback,
 		});
 	}
 }

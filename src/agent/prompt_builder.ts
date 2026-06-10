@@ -19,7 +19,7 @@
  *   [7] Skills index     — (Phase 5, stub for now)
  */
 
-import type { App, TFile } from 'obsidian';
+import type { App } from 'obsidian';
 import type { AIAgentSettings } from '../settings';
 import type { LLMMessage } from '../llm_core';
 import type { ToolDefinition } from './tool_schemas';
@@ -225,11 +225,19 @@ export function buildPreambleBlock(vaultName: string): LLMMessage {
 	};
 }
 
-// ── Skills index block (Phase 5 stub) ─────────────────────────────────────
+// ── Skills block (Phase 5) ────────────────────────────────────────────────
 
-export function buildSkillsBlock(_skills: string[]): LLMMessage | null {
-	// Phase 5: inject skills index here
-	return null;
+export function buildSkillsBlock(skillsMarkdown: string | null | undefined): LLMMessage | null {
+	if (!skillsMarkdown?.trim()) return null;
+	return {
+		role: 'system',
+		content: [
+			'LEARNED SKILLS — proven procedures from past sessions that match this request.',
+			'Follow them unless the user asks for something different:',
+			'',
+			skillsMarkdown,
+		].join('\n'),
+	};
 }
 
 // ── Full prompt assembly ──────────────────────────────────────────────────
@@ -240,6 +248,7 @@ export interface PromptConfig {
 	selectedTools: ToolDefinition[];
 	memories?: Array<{ text: string; category: string }>;
 	includeActiveNote?: boolean;
+	skillsMarkdown?: string;
 }
 
 export async function buildSystemPrompt(cfg: PromptConfig): Promise<LLMMessage[]> {
@@ -249,6 +258,7 @@ export async function buildSystemPrompt(cfg: PromptConfig): Promise<LLMMessage[]
 		buildVaultStateBlock(cfg.app, cfg.settings),
 		cfg.memories?.length ? buildMemoryBlock(cfg.memories) : null,
 		buildToolSectionsBlock(cfg.selectedTools),
+		buildSkillsBlock(cfg.skillsMarkdown),
 	];
 
 	if (cfg.includeActiveNote !== false) {
