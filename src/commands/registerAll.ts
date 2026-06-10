@@ -1,4 +1,5 @@
 import { register } from './registry';
+import { formatRunStats } from '../traces';
 import {
 	executeWrite, executeEdit, executeFind, executeSummarize,
 	executeClip, executeClipLearn, executeRead, executeHandwriting,
@@ -123,3 +124,8 @@ register('ingest', (args, ctx) =>
 register('transcribe', (args, ctx) =>
 	executeTranscribe(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings)
 );
+
+register('runstats', (_args, ctx) => {
+	ctx.addMessage('assistant', formatRunStats(200));
+	return Promise.resolve();
+});

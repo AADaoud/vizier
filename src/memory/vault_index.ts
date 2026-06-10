@@ -1,0 +1,337 @@
+/**
+ * memory/vault_index.ts
+ *
+ * Hybrid vault search index — Phase 2.1.
+ *
+ * Algorithm (Odysseus §retrieval stack adapted for TypeScript/Obsidian):
+ *   hybrid_score = 0.7 × vector_similarity + 0.3 × bm25_score
+ *   threshold ≈ 0.35, k = 5, 10K-char injection cap
+ *
+ * Architecture:
+ *   - Chunk notes by heading (H2/H3 sections), fall back to ~400-char windows
+ *   - Embed each chunk via Ollama's embedding API (embedding role)
+ *   - Persist index as {path, chunk_id, text_hash, vector, text} in vault_index.json
+ *   - Incremental update on Obsidian vault modify/create/delete events (hash-deduped)
+ *   - BM25 scores are computed at query time (no pre-built inverted index needed at this scale)
+ *
+ * The index lives in the plugin directory, not the vault, so it won't appear
+ * as a note in the user's workspace.
+ */
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fs   = require('fs')   as typeof import('fs');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const path = require('path') as typeof import('path');
+
+import type { App, TFile } from 'obsidian';
+import { buildLLMConfig, getEmbedding, cosineSimilarity } from '../llm_core';
+import type { AIAgentSettings } from '../settings';
+import { recordRun } from '../traces';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export interface IndexChunk {
+	path: string;       // vault file path
+	basename: string;
+	chunk_id: string;   // `${path}#${chunkIndex}`
+	text_hash: string;  // sha-ish: first 12 chars of btoa(text)
+	text: string;
+	vector: number[];
+	indexed_at: number; // unix ms
+}
+
+export interface SearchResult {
+	chunk: IndexChunk;
+	score: number;
+	vector_score: number;
+	bm25_score: number;
+}
+
+export interface ReindexStats {
+	files: number;
+	chunksAdded: number;
+	embedFailures: number;
+}
+
+// ── BM25 implementation ────────────────────────────────────────────────────
+
+const STOP_WORDS = new Set([
+	'a','an','the','is','in','of','for','to','and','or','that','this','it',
+	'was','with','as','at','by','i','my','me','we','are','on','be','has','had',
+	'have','do','does','did','not','but','so','if','about','from',
+]);
+
+function tokenize(text: string): string[] {
+	return text.toLowerCase()
+		.split(/\s+/)
+		.map(w => w.replace(/[^a-z0-9]/g, ''))
+		.filter(w => w.length >= 2 && !STOP_WORDS.has(w));
+}
+
+function textHash(text: string): string {
+	// Simple non-cryptographic hash — just for dedup checks
+	return btoa(text.slice(0, 64)).slice(0, 12);
+}
+
+interface BM25Corpus {
+	df: Map<string, number>;    // document frequency per term
+	docCount: number;
+	avgDocLen: number;
+}
+
+function buildBM25Corpus(chunks: IndexChunk[]): BM25Corpus {
+	const df = new Map<string, number>();
+	let totalLen = 0;
+
+	for (const chunk of chunks) {
+		const terms = new Set(tokenize(chunk.text));
+		totalLen += terms.size;
+		for (const t of terms) df.set(t, (df.get(t) ?? 0) + 1);
+	}
+
+	return { df, docCount: chunks.length, avgDocLen: chunks.length ? totalLen / chunks.length : 1 };
+}
+
+function bm25Score(query: string, docText: string, corpus: BM25Corpus, k1 = 1.5, b = 0.75): number {
+	const queryTerms = tokenize(query);
+	const docTokens  = tokenize(docText);
+	const docLen     = docTokens.length;
+	const tf = new Map<string, number>();
+	for (const t of docTokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+
+	let score = 0;
+	for (const qt of queryTerms) {
+		const termTF  = tf.get(qt) ?? 0;
+		if (termTF === 0) continue;
+		const df      = corpus.df.get(qt) ?? 0;
+		const idf     = Math.log((corpus.docCount - df + 0.5) / (df + 0.5) + 1);
+		const tfNorm  = (termTF * (k1 + 1)) / (termTF + k1 * (1 - b + b * (docLen / corpus.avgDocLen)));
+		score += idf * tfNorm;
+	}
+	return score;
+}
+
+// ── Chunking ──────────────────────────────────────────────────────────────
+
+function chunkByHeadings(text: string, maxChars = 600): string[] {
+	// Split on H2/H3 headings
+	const sections = text.split(/\n(?=##\s)/);
+	const chunks: string[] = [];
+
+	for (const section of sections) {
+		if (section.length <= maxChars) {
+			chunks.push(section.trim());
+		} else {
+			// Further split large sections into ~maxChars windows with 100-char overlap
+			let pos = 0;
+			while (pos < section.length) {
+				chunks.push(section.slice(pos, pos + maxChars).trim());
+				pos += maxChars - 100;
+			}
+		}
+	}
+
+	return chunks.filter(c => c.length > 50); // drop tiny fragments
+}
+
+// ── VaultIndex ────────────────────────────────────────────────────────────
+
+export class VaultIndex {
+	private storePath: string;
+	private chunks: IndexChunk[] = [];
+	private dirty = false;
+
+	constructor(pluginDir: string) {
+		this.storePath = path.join(pluginDir, 'vault_index.json');
+		this.load();
+	}
+
+	// ── Persistence ──────────────────────────────────────────────────
+
+	private load(): void {
+		try {
+			if (fs.existsSync(this.storePath)) {
+				const raw = fs.readFileSync(this.storePath, 'utf-8');
+				this.chunks = JSON.parse(raw) as IndexChunk[];
+			}
+		} catch { this.chunks = []; }
+	}
+
+	private save(): void {
+		try {
+			fs.writeFileSync(this.storePath, JSON.stringify(this.chunks), 'utf-8');
+			this.dirty = false;
+		} catch { /* best-effort */ }
+	}
+
+	// ── Index management ─────────────────────────────────────────────
+
+	/** Remove all chunks for a given file path. */
+	removeFile(filePath: string): void {
+		const before = this.chunks.length;
+		this.chunks = this.chunks.filter(c => c.path !== filePath);
+		if (this.chunks.length !== before) this.dirty = true;
+	}
+
+	/** Index or re-index a single file. Skips chunks whose text_hash hasn't changed. */
+	async indexFile(file: TFile, app: App, settings: AIAgentSettings): Promise<{ added: number; failed: number }> {
+		const content = await app.vault.cachedRead(file);
+		// Strip YAML frontmatter from indexing (the metadata is in frontmatter cache)
+		const body = content.replace(/^---[\s\S]*?---\n/, '').trim();
+		if (body.length < 100) return { added: 0, failed: 0 }; // too short to index
+
+		const rawChunks = chunkByHeadings(body);
+		const cfg       = buildLLMConfig(settings);
+		let added = 0;
+		let failed = 0;
+
+		for (let i = 0; i < rawChunks.length; i++) {
+			const text = rawChunks[i] ?? '';
+			const hash = textHash(text);
+			const id   = `${file.path}#${i}`;
+
+			// Skip if unchanged
+			const existing = this.chunks.find(c => c.chunk_id === id);
+			if (existing?.text_hash === hash) continue;
+
+			try {
+				const { vector } = await getEmbedding(cfg, text);
+				const chunk: IndexChunk = {
+					path: file.path,
+					basename: file.basename,
+					chunk_id: id,
+					text_hash: hash,
+					text,
+					vector,
+					indexed_at: Date.now(),
+				};
+
+				if (existing) {
+					Object.assign(existing, chunk);
+				} else {
+					this.chunks.push(chunk);
+				}
+				this.dirty = true;
+				added++;
+			} catch (err) {
+				failed++;
+				if (failed === 1) console.warn('[Vizier] chunk embedding failed:', err);
+			}
+		}
+
+		if (this.dirty) this.save();
+		return { added, failed };
+	}
+
+	/** Full incremental re-index of the vault. Processes only changed/new files.
+	 *  Throws with a clear message when the embedding model is unavailable. */
+	async reindexVault(app: App, settings: AIAgentSettings, onProgress?: (done: number, total: number) => void): Promise<ReindexStats> {
+		const start = Date.now();
+		const cfg   = buildLLMConfig(settings);
+
+		// Pre-flight: fail loudly (not per-chunk-silently) if embeddings are down
+		try {
+			await getEmbedding(cfg, 'vizier embedding pre-flight test');
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			recordRun({ kind: 'vault_index', duration_ms: Date.now() - start, ok: false, error: msg });
+			throw new Error(`Embedding unavailable — vault index cannot build. ${msg}`);
+		}
+
+		const files = app.vault.getMarkdownFiles();
+		let chunksAdded   = 0;
+		let embedFailures = 0;
+
+		for (let i = 0; i < files.length; i++) {
+			const file = files[i];
+			if (!file) continue;
+			try {
+				onProgress?.(i, files.length);
+				const r = await this.indexFile(file, app, settings);
+				chunksAdded   += r.added;
+				embedFailures += r.failed;
+			} catch { embedFailures++; }
+		}
+
+		if (this.dirty) this.save();
+		recordRun({ kind: 'vault_index', duration_ms: Date.now() - start, ok: embedFailures === 0, notes_touched: files.length, chunks_added: chunksAdded, embed_failures: embedFailures });
+		return { files: files.length, chunksAdded, embedFailures };
+	}
+
+	// ── Search ────────────────────────────────────────────────────────
+
+	/**
+	 * Hybrid search: 0.7 × cosine(vector) + 0.3 × BM25.
+	 * Returns up to `k` chunks above the threshold.
+	 */
+	async search(
+		query: string,
+		settings: AIAgentSettings,
+		k = 5,
+		threshold = 0.35
+	): Promise<SearchResult[]> {
+		if (this.chunks.length === 0) return [];
+
+		const cfg    = buildLLMConfig(settings);
+		const corpus = buildBM25Corpus(this.chunks);
+
+		// Get query embedding
+		let queryVector: number[];
+		try {
+			const { vector } = await getEmbedding(cfg, query);
+			queryVector = vector;
+		} catch {
+			// Embedding failed — fall back to BM25-only
+			return this.bm25OnlySearch(query, corpus, k, threshold);
+		}
+
+		// Score all chunks
+		const maxBM25 = Math.max(...this.chunks.map(c => bm25Score(query, c.text, corpus))) || 1;
+
+		const results: SearchResult[] = this.chunks.map(chunk => {
+			const vector_score = chunk.vector.length === queryVector.length
+				? cosineSimilarity(queryVector, chunk.vector)
+				: 0;
+			const raw_bm25    = bm25Score(query, chunk.text, corpus);
+			const bm25_score  = raw_bm25 / maxBM25; // normalize to [0,1]
+			const score       = 0.7 * vector_score + 0.3 * bm25_score;
+			return { chunk, score, vector_score, bm25_score };
+		});
+
+		return results
+			.filter(r => r.score >= threshold)
+			.sort((a, b) => b.score - a.score)
+			.slice(0, k);
+	}
+
+	private bm25OnlySearch(query: string, corpus: BM25Corpus, k: number, threshold: number): SearchResult[] {
+		const maxBM25 = Math.max(...this.chunks.map(c => bm25Score(query, c.text, corpus))) || 1;
+		return this.chunks
+			.map(chunk => {
+				const raw = bm25Score(query, chunk.text, corpus);
+				const norm = raw / maxBM25;
+				return { chunk, score: norm, vector_score: 0, bm25_score: norm };
+			})
+			.filter(r => r.score >= threshold)
+			.sort((a, b) => b.score - a.score)
+			.slice(0, k);
+	}
+
+	/** Format search results as a markdown string for agent context injection. */
+	formatResults(results: SearchResult[], cap = 10_000): string {
+		if (results.length === 0) return 'No relevant vault chunks found.';
+		let out = '';
+		for (const r of results) {
+			const snippet = r.chunk.text.slice(0, 400);
+			const line = `**[[${r.chunk.basename}]]** (score: ${r.score.toFixed(2)})\n${snippet}\n\n`;
+			if (out.length + line.length > cap) break;
+			out += line;
+		}
+		return out.trim();
+	}
+
+	getStats(): { total_chunks: number; total_files: number } {
+		const files = new Set(this.chunks.map(c => c.path));
+		return { total_chunks: this.chunks.length, total_files: files.size };
+	}
+}

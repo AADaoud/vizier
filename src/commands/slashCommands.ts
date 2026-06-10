@@ -192,6 +192,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		description: 'Transcribe an audio file or podcast URL via Whisper',
 		template: '/transcribe ',
 	},
+	{
+		id: 'runstats',
+		label: '/runstats',
+		description: 'Show Vizier run statistics and model usage from the trace log',
+		template: '/runstats',
+	},
 ];
 
 // --- helpers ---

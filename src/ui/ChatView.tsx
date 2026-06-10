@@ -43,6 +43,7 @@ export class ChatView extends ItemView {
 						settings={this.pluginSettings}
 						initialCommand={initialCommand}
 						onRegisterInputInjector={(fn) => { this.inputInjector = fn; }}
+						memoryManager={this.plugin.memoryManager ?? undefined}
 					/>
 				</AppContext.Provider>
 			</StrictMode>

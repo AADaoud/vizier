@@ -1,5 +1,5 @@
-import { Notice, Plugin } from 'obsidian';
-import { AIAgentSettings, DEFAULT_SETTINGS, AIAgentSettingTab } from './settings';
+import { FileSystemAdapter, Notice, Plugin, TFile } from 'obsidian';
+import { AIAgentSettings, DEFAULT_SETTINGS, AIAgentSettingTab, migrateLegacyRoleDefaults } from './settings';
 import { ChatView, VIEW_TYPE_AI_CHAT } from './ui/ChatView';
 import { TranscriptServerManager, ServerSetupModal } from './ui/ServerSetupModal';
 import { executeWrite, executeEdit, executeClip, executeRead, CommandConfig, AddMessage } from './commands/slashCommands';
@@ -8,6 +8,11 @@ import { executeStandardize } from './commands/miscCommands';
 import { executeSocratic, executeReflection, executeFreewrite, executeSources } from './commands/reflectionCommands';
 import { promptModal } from './ui/PromptModal';
 import { mapReduceSummarize } from './utils/chunking';
+import { initTraces, formatRunStats } from './traces';
+import { warmCapabilities, buildLLMConfig } from './llm_core';
+import { invalidateVaultCache } from './agent/prompt_builder';
+import { MemoryManager } from './memory/memory_manager';
+import { VaultIndex } from './memory/vault_index';
 
 // ── Notice-based message helpers ───────────────────────────────────────────
 
@@ -25,6 +30,8 @@ function noticeCallbacks(): { addMessage: AddMessage; replaceMessage: AddMessage
 export default class VizierPlugin extends Plugin {
 	settings: AIAgentSettings;
 	serverManager: TranscriptServerManager;
+	memoryManager: MemoryManager | null = null;
+	vaultIndex: VaultIndex | null = null;
 
 	/** Pending command to inject into a newly opened chat view. */
 	pendingChatCommand: string | null = null;
@@ -32,7 +39,68 @@ export default class VizierPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.serverManager = new TranscriptServerManager(this.app, this.manifest.dir ?? '');
+		// manifest.dir is vault-relative (.obsidian/plugins/vizier) — Node fs
+		// (traces, memories, vault index) needs the absolute filesystem path.
+		const adapter = this.app.vault.adapter;
+		const relDir = this.manifest.dir ?? '';
+		const pluginDir = adapter instanceof FileSystemAdapter && relDir
+			? adapter.getFullPath(relDir)
+			: '';
+
+		// ── Phase 0: initialise observability ─────────────────────────
+		initTraces(pluginDir);
+
+		// ── Phase 0: warm capability cache for all configured models ──
+		void warmCapabilities(buildLLMConfig(this.settings));
+
+		// ── Phase 2: initialise memory and vault index ─────────────────
+		if (this.settings.features.memory && pluginDir) {
+			this.memoryManager = new MemoryManager(pluginDir);
+			this.vaultIndex    = new VaultIndex(pluginDir);
+
+			// Incremental vault re-index in the background after load
+			this.app.workspace.onLayoutReady(() => {
+				void this.vaultIndex?.reindexVault(this.app, this.settings)
+					.catch((err: unknown) => console.warn('[Vizier] background vault reindex failed:', err));
+			});
+
+			// Keep vault index up to date on file changes
+			this.registerEvent(
+				this.app.vault.on('modify', (file) => {
+					if (file instanceof TFile && file.extension === 'md') {
+						invalidateVaultCache();
+						void this.vaultIndex?.indexFile(file, this.app, this.settings);
+					}
+				})
+			);
+			this.registerEvent(
+				this.app.vault.on('create', (file) => {
+					if (file instanceof TFile && file.extension === 'md') {
+						invalidateVaultCache();
+						void this.vaultIndex?.indexFile(file, this.app, this.settings);
+					}
+				})
+			);
+			this.registerEvent(
+				this.app.vault.on('delete', (file) => {
+					if (file instanceof TFile) {
+						invalidateVaultCache();
+						this.vaultIndex?.removeFile(file.path);
+					}
+				})
+			);
+			this.registerEvent(
+				this.app.vault.on('rename', (file, oldPath) => {
+					if (file instanceof TFile && file.extension === 'md') {
+						invalidateVaultCache();
+						this.vaultIndex?.removeFile(oldPath);
+						void this.vaultIndex?.indexFile(file, this.app, this.settings);
+					}
+				})
+			);
+		}
+
+		this.serverManager = new TranscriptServerManager(this.app, relDir);
 
 		this.registerView(
 			VIEW_TYPE_AI_CHAT,
@@ -48,6 +116,35 @@ export default class VizierPlugin extends Plugin {
 			id: 'open-ai-agent-chat',
 			name: 'Chat',
 			callback: () => { void this.activateChatView(); },
+		});
+
+		// ── Phase 0: run stats ─────────────────────────────────────────
+		this.addCommand({
+			id: 'vizier-run-stats',
+			name: 'Show run stats',
+			callback: () => { void this.activateChatView('/runstats'); },
+		});
+
+		// ── Phase 2: rebuild vault index ───────────────────────────────
+		this.addCommand({
+			id: 'vizier-reindex-vault',
+			name: 'Re-index vault (rebuild vector search index)',
+			callback: () => {
+				if (!this.vaultIndex) {
+					new Notice('Vault index is disabled. Enable Memory in Vizier settings.');
+					return;
+				}
+				new Notice('Rebuilding vault index… this may take a moment.');
+				void this.vaultIndex.reindexVault(this.app, this.settings)
+					.then((r) => {
+						const stats = this.vaultIndex?.getStats();
+						const failNote = r.embedFailures > 0 ? ` (${r.embedFailures} chunks failed to embed)` : '';
+						new Notice(`Vault index rebuilt: ${stats?.total_chunks ?? 0} chunks from ${stats?.total_files ?? 0} notes.${failNote}`, 8000);
+					})
+					.catch((err: unknown) => {
+						new Notice(`Vault index failed: ${err instanceof Error ? err.message : String(err)}`, 10_000);
+					});
+			},
 		});
 
 		// ── Write note with AI ─────────────────────────────────────────
@@ -132,36 +229,26 @@ export default class VizierPlugin extends Plugin {
 				if (!checking) {
 					void (async () => {
 						const content = await this.app.vault.read(file);
-
-						// Detect frontmatter so the callout goes after it
 						const fmMatch = content.match(/^---\n[\s\S]*?\n---\n/);
 						const insertPos = fmMatch ? fmMatch[0].length : 0;
 						const body = content.slice(insertPos);
-
 						if (body.trimStart().startsWith('> [!abstract]')) {
 							new Notice('This note already has an abstract callout.');
 							return;
 						}
-
 						new Notice('Generating abstract…');
 						const config: CommandConfig = {
 							ollamaUrl: this.settings.ollamaUrl,
 							serverUrl: this.settings.serverUrl,
 						};
-
 						try {
 							const summary = await mapReduceSummarize(
-								content,
-								this.settings.defaultModel,
-								`note "${file.basename}"`,
-								config.ollamaUrl
+								content, this.settings.defaultModel, `note "${file.basename}"`, config.ollamaUrl
 							);
-
 							const calloutBody = summary.split('\n').map(l => `> ${l}`).join('\n');
 							const callout = `> [!abstract] Summary\n${calloutBody}`;
-
 							const before = content.slice(0, insertPos);
-							const after = body.trimStart();
+							const after  = body.trimStart();
 							await this.app.vault.modify(file, `${before}${callout}\n\n${after}`);
 							new Notice('Abstract callout added.');
 						} catch (err) {
@@ -370,7 +457,7 @@ export default class VizierPlugin extends Plugin {
 					void this.serverManager.isServerReachable(this.settings.serverUrl).then(reachable => {
 						if (reachable) {
 							// eslint-disable-next-line obsidianmd/ui/sentence-case
-					new Notice('Vizier server is running from a previous session — restart Obsidian or kill the Python process manually.');
+							new Notice('Vizier server is running from a previous session — restart Obsidian or kill the Python process manually.');
 						} else {
 							new Notice('Vizier server is not running.');
 						}
@@ -389,7 +476,7 @@ export default class VizierPlugin extends Plugin {
 	async activateChatView(initialCommand?: string) {
 		const { workspace } = this.app;
 
-		const leaves = workspace.getLeavesOfType(VIEW_TYPE_AI_CHAT);
+		const leaves   = workspace.getLeavesOfType(VIEW_TYPE_AI_CHAT);
 		const existing = leaves[0];
 		if (existing) {
 			void workspace.revealLeaf(existing);
@@ -410,7 +497,20 @@ export default class VizierPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<AIAgentSettings>);
+		const loaded = await this.loadData() as Partial<AIAgentSettings> | null;
+		// Deep merge roles (new field — may be absent in old saved data)
+		const base = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
+		if (!base.roles) base.roles = DEFAULT_SETTINGS.roles;
+		if (!base.features) base.features = DEFAULT_SETTINGS.features;
+		// Per-role: merge so existing models are preserved
+		for (const role of ['default', 'utility', 'research', 'embedding'] as const) {
+			if (!base.roles[role]?.models?.length) {
+				base.roles[role] = DEFAULT_SETTINGS.roles[role];
+			}
+		}
+		const migrated = migrateLegacyRoleDefaults(base.roles);
+		this.settings = base;
+		if (migrated) await this.saveSettings();
 	}
 
 	async saveSettings() {
