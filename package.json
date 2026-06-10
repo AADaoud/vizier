@@ -1,6 +1,6 @@
 {
 	"name": "vizier",
-	"version": "1.0.0",
+	"version": "0.7.0",
 	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
 	"main": "main.js",
 	"type": "module",
