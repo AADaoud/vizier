@@ -22,6 +22,9 @@ import type { AIAgentSettings } from '../settings';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+/** Provenance tiers, strongest to weakest evidence chain. */
+export type ClaimProvenance = 'primary' | 'secondary' | 'model' | 'user';
+
 export interface NoteClaim {
 	id: string;
 	text: string;
@@ -29,6 +32,7 @@ export interface NoteClaim {
 	confidence: number;
 	sources: string[];
 	created: string;          // YYYY-MM-DD
+	provenance: ClaimProvenance;
 	contested_reason?: string;
 }
 
@@ -89,7 +93,8 @@ export async function addClaim(
 	file: TFile,
 	text: string,
 	confidence = 0.7,
-	sources: string[] = []
+	sources: string[] = [],
+	provenance: ClaimProvenance = 'user'
 ): Promise<NoteClaim> {
 	const claim: NoteClaim = {
 		id: newClaimId(),
@@ -98,6 +103,7 @@ export async function addClaim(
 		confidence: Math.max(0, Math.min(1, confidence)),
 		sources,
 		created: todayISO(),
+		provenance,
 	};
 	await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 		const existing = isClaimArray(fm['claims']) ? fm['claims'] : [];
@@ -180,6 +186,7 @@ export function formatClaims(claims: NoteClaim[]): string {
 	return claims.map(c => {
 		const statusBadge = c.status === 'active' ? '' : ` [${c.status.toUpperCase()}]`;
 		const src = c.sources.length ? ` — sources: ${c.sources.join('; ')}` : ' — uncited';
-		return `- \`${c.id}\`${statusBadge} (${Math.round(c.confidence * 100)}%) ${c.text}${src}`;
+		const prov = c.provenance ? ` [${c.provenance}]` : '';
+		return `- \`${c.id}\`${statusBadge}${prov} (${Math.round(c.confidence * 100)}%) ${c.text}${src}`;
 	}).join('\n');
 }

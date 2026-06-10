@@ -15,6 +15,9 @@ import {
 } from './reflectionCommands';
 import { executeIngest, executeTranscribe } from './ingestCommands';
 import { executeGaps } from './gapsCommand';
+import { runIntake } from '../intake/feeds';
+import { generateBriefing } from '../intake/briefing';
+import { getAgentPluginDir, getAgentMemoryManager } from '../agent/tool_execution';
 
 register('write', (args, ctx) =>
 	executeWrite(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.aiNotesFolder)
@@ -134,3 +137,28 @@ register('runstats', (_args, ctx) => {
 register('gaps', (args, ctx) =>
 	executeGaps(args, ctx.app, ctx.addMessage, ctx.replaceMessage, ctx.settings)
 );
+
+register('intake', async (_args, ctx) => {
+	ctx.addMessage('assistant', 'Running feed intake…');
+	try {
+		const r = await runIntake(
+			ctx.app, ctx.settings, getAgentPluginDir(), getAgentMemoryManager(),
+			msg => ctx.replaceMessage('assistant', `Running feed intake… ${msg}`)
+		);
+		const dest = r.notePath ? `\n\nSaved to \`${r.notePath}\`.` : '';
+		ctx.replaceMessage('assistant', `Intake complete: ${r.feeds} feeds, ${r.fresh} new items, ${r.triaged} triaged, **${r.kept} kept**.${dest}`);
+	} catch (err) {
+		ctx.replaceMessage('assistant', `Intake failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+});
+
+register('briefing', async (_args, ctx) => {
+	ctx.addMessage('assistant', 'Generating briefing…');
+	try {
+		const notePath = await generateBriefing(ctx.app, ctx.settings, getAgentMemoryManager());
+		const name = notePath.replace(/^.*\//, '').replace(/\.md$/, '');
+		ctx.replaceMessage('assistant', `Briefing ready: [[${name}]]`);
+	} catch (err) {
+		ctx.replaceMessage('assistant', `Briefing failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+});

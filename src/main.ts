@@ -11,7 +11,7 @@ import { mapReduceSummarize } from './utils/chunking';
 import { initTraces } from './traces';
 import { warmCapabilities, buildLLMConfig } from './llm_core';
 import { invalidateVaultCache } from './agent/prompt_builder';
-import { setAgentVaultIndex, setAgentPluginDir } from './agent/tool_execution';
+import { setAgentVaultIndex, setAgentPluginDir, setAgentMemoryManager } from './agent/tool_execution';
 import { MemoryManager } from './memory/memory_manager';
 import { VaultIndex } from './memory/vault_index';
 import { runContradictionScan } from './epistemic/contradiction_engine';
@@ -63,6 +63,7 @@ export default class VizierPlugin extends Plugin {
 			this.memoryManager = new MemoryManager(pluginDir);
 			this.vaultIndex    = new VaultIndex(pluginDir);
 			setAgentVaultIndex(this.vaultIndex);
+			setAgentMemoryManager(this.memoryManager);
 
 			// Incremental vault re-index in the background after load
 			this.app.workspace.onLayoutReady(() => {
@@ -169,6 +170,18 @@ export default class VizierPlugin extends Plugin {
 						new Notice(`Contradiction scan failed: ${err instanceof Error ? err.message : String(err)}`, 10_000);
 					});
 			},
+		});
+
+		// ── Phase 4: intake + briefing ─────────────────────────────────
+		this.addCommand({
+			id: 'run-intake',
+			name: 'Run feed intake now',
+			callback: () => { void this.activateChatView('/intake'); },
+		});
+		this.addCommand({
+			id: 'generate-briefing',
+			name: 'Generate daily briefing',
+			callback: () => { void this.activateChatView('/briefing'); },
 		});
 
 		// ── Write note with AI ─────────────────────────────────────────

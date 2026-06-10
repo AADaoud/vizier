@@ -204,6 +204,18 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		description: 'Analyze the vault for missing themes, entities, and readings',
 		template: '/gaps ',
 	},
+	{
+		id: 'intake',
+		label: '/intake',
+		description: 'Fetch and triage your RSS feeds against your interests',
+		template: '/intake',
+	},
+	{
+		id: 'briefing',
+		label: '/briefing',
+		description: 'Generate a daily briefing from intake, recent work, and open tensions',
+		template: '/briefing',
+	},
 ];
 
 // --- helpers ---

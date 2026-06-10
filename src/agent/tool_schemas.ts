@@ -332,12 +332,15 @@ Saves transcript to the transcripts folder.`,
 			text:       { type: 'string', description: 'The claim as a single checkable assertion.' },
 			confidence: { type: 'number', description: 'Confidence 0-1 (default 0.7).' },
 			sources:    { type: 'array', description: 'Sources backing the claim (URLs or note names).', items: { type: 'string' } },
+			provenance: { type: 'string', enum: ['primary', 'secondary', 'model', 'user'], description: 'Evidence tier: primary source, secondary source, model knowledge, or user assertion (default user).' },
 		},
 		required: ['text'],
 		keywords: ['claim', 'assert', 'fact', 'record that', 'evidence'],
 		doc: `add_claim — Attach a machine-readable claim to a note.
 A claim is ONE checkable assertion, not a summary. Keep it under 25 words.
 Uncited claims are flagged by audits — pass sources when you have them.
+Set provenance honestly: 'model' for your own knowledge, 'secondary' for
+articles/wiki, 'primary' only for original documents/data.
 Claims power the contradiction engine: write them for anything load-bearing.`,
 	},
 

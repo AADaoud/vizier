@@ -45,6 +45,7 @@ import {
 	deduplicatePath,
 } from '../utils/noteBuilder';
 import type { VaultIndex } from '../memory/vault_index';
+import type { MemoryManager } from '../memory/memory_manager';
 import {
 	findNote,
 	getClaims,
@@ -60,9 +61,13 @@ import {
 
 let _vaultIndex: VaultIndex | null = null;
 let _pluginDir = '';
+let _memoryManager: MemoryManager | null = null;
 
 export function setAgentVaultIndex(vi: VaultIndex | null): void { _vaultIndex = vi; }
 export function setAgentPluginDir(dir: string): void { _pluginDir = dir; }
+export function getAgentPluginDir(): string { return _pluginDir; }
+export function setAgentMemoryManager(mm: MemoryManager | null): void { _memoryManager = mm; }
+export function getAgentMemoryManager(): MemoryManager | null { return _memoryManager; }
 
 // ── Message capture adapter ───────────────────────────────────────────────
 // Existing commands write to addMessage/replaceMessage callbacks.
@@ -459,12 +464,14 @@ async function handleAddClaim(params: Record<string, unknown>, app: App): Promis
 	const confidence = num(params, 'confidence', 0.7);
 	const sourcesRaw = params['sources'];
 	const sources    = Array.isArray(sourcesRaw) ? sourcesRaw.filter((s): s is string => typeof s === 'string') : [];
+	const provRaw    = str(params, 'provenance', 'user');
+	const provenance = (['primary', 'secondary', 'model', 'user'] as const).find(p => p === provRaw) ?? 'user';
 	if (!text) return 'ERROR: add_claim requires a text parameter.';
 
 	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
 	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
 
-	const claim = await addClaim(app, file, text, confidence, sources);
+	const claim = await addClaim(app, file, text, confidence, sources, provenance);
 	return `Added claim \`${claim.id}\` to [[${file.basename}]]: "${claim.text}"${sources.length ? '' : ' (uncited — consider cite_claim once a source is known)'}`;
 }
 

@@ -75,6 +75,18 @@ export interface ConversationMessage {
 	content: string;
 }
 
+// ── Chitchat fast-path ─────────────────────────────────────────────────────
+// Small models reliably over-trigger tools on greetings ("hello" → read the
+// active note and summarise it). Rules in the prompt don't restrain a 2B
+// model, so catch trivial conversational openers deterministically and skip
+// tool dispatch entirely.
+
+const CHITCHAT_RE = /^(hi|hello|hey|yo|salam|salaam|selam|good (morning|afternoon|evening)|thanks?|thank you|ok(ay)?|cool|nice|great|bye|goodbye|how are you\??|what'?s up\??)[.!\s]*$/i;
+
+function isChitchat(message: string): boolean {
+	return message.trim().length <= 40 && CHITCHAT_RE.test(message.trim());
+}
+
 // ── Loop-breaker state ─────────────────────────────────────────────────────
 
 function toolCallKey(name: string, params: Record<string, unknown>): string {
@@ -203,6 +215,9 @@ export async function runAgentLoop(
 	const lastToolKeys = new Set<string>(); // loop-breaker state
 	let round = 0;
 	let forceProseRound = false; // set by loop-breaker
+
+	// Greetings/small talk: skip tool dispatch, go straight to a prose reply
+	if (isChitchat(userMessage)) forceProseRound = true;
 
 	try {
 		while (round < MAX_ROUNDS) {

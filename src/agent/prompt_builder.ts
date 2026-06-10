@@ -31,6 +31,8 @@ const RULES = `
 RULES — read before every response:
 
 1. Only use tools when needed. Do NOT search the vault for things already in context.
+   Greetings, thanks, and small talk get a plain conversational reply with ZERO tool calls —
+   never search or read notes the user did not ask about.
 2. BIAS TOWARD ACTION on note edits — do not ask which heading, JUST DO IT with your best interpretation. The user can undo. Obsidian has file recovery.
 3. After a tool SUCCEEDS, do not second-guess. Reply with one short sentence and a [[wikilink]] to the note. No re-reading, no validation theater.
 4. After a tool FAILS, DO NOT GO SILENT — say what failed and try the next-best approach. A failed vault_search is not a stopping condition.
@@ -69,6 +71,8 @@ export async function buildActiveNoteBlock(app: App): Promise<LLMMessage | null>
 		role: 'system',
 		content: [
 			`ACTIVE NOTE (PROTECTED CONTEXT): [[${file.basename}]]`,
+			'This is BACKGROUND CONTEXT only — the note the user happens to have open.',
+			'Do NOT summarise, analyse, or act on it unless the user explicitly asks about it.',
 			'The content below IS the note. Do NOT call read_note for it — it is already loaded.',
 			'To edit it: use edit_note with FIND/REPLACE blocks. Only use write_note if creating a different note.',
 			'',

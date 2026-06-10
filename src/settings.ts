@@ -70,6 +70,10 @@ export interface AIAgentSettings {
 	contradictionsFolder: string;
 	/** Folder where skills are stored. */
 	skillsFolder: string;
+
+	// ── New: intake (Phase 4) ─────────────────────────────────────────
+	/** RSS/Atom feed URLs, one per line (or comma-separated). */
+	feedUrls: string;
 }
 
 export const DEFAULT_SETTINGS: AIAgentSettings = {
@@ -109,6 +113,8 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	inboxFolder:         'Vizier/Inbox',
 	contradictionsFolder:'Vizier/Contradictions',
 	skillsFolder:        'Vizier/Skills',
+
+	feedUrls: '',
 };
 
 // Role chains shipped before the gemma4 era. If a saved settings file still
@@ -373,6 +379,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Default role models')
 			.setDesc('Comma-separated fallback chain for chat, /write, and agent loop turns. First available model is used.')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('gemma3:12b, gemma3:4b')
 				.setValue(this.plugin.settings.roles.default.models.join(', '))
 				.onChange(async (value) => {
@@ -386,6 +393,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Utility role models')
 			.setDesc('Fast model(s) for tagging, metadata extraction, memory dedup. Should be the smallest capable model.')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('gemma3:4b')
 				.setValue(this.plugin.settings.roles.utility.models.join(', '))
 				.onChange(async (value) => {
@@ -399,6 +407,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Research role models')
 			.setDesc('Largest available model(s) for /thesis, deep synthesis, and gap analysis.')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('gemma3:27b, gemma3:12b')
 				.setValue(this.plugin.settings.roles.research.models.join(', '))
 				.onChange(async (value) => {
@@ -410,8 +419,10 @@ export class AIAgentSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Embedding role models')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Embedding model for vector operations (vault index, memory retrieval). Must support /api/embeddings.')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('nomic-embed-text')
 				.setValue(this.plugin.settings.roles.embedding.models.join(', '))
 				.onChange(async (value) => {
@@ -440,20 +451,44 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.onChange(async (v) => { this.plugin.settings.features.memory = v; await this.plugin.saveSettings(); }));
 
 		new Setting(containerEl)
-			.setName('Daily intake (Phase 4)')
-			.setDesc('RSS/feed processing and daily briefing pipeline. Not yet implemented.')
+			.setName('Daily intake')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setDesc('Triage configured RSS/Atom feeds against your interests on a daily schedule.')
 			.addToggle(t => t
 				.setValue(this.plugin.settings.features.intake)
 				.onChange(async (v) => { this.plugin.settings.features.intake = v; await this.plugin.saveSettings(); }));
 
+		new Setting(containerEl)
+			.setName('Daily briefing')
+			.setDesc('Generate a morning briefing note from intake, recent activity, and open contradictions.')
+			.addToggle(t => t
+				.setValue(this.plugin.settings.features.briefing)
+				.onChange(async (v) => { this.plugin.settings.features.briefing = v; await this.plugin.saveSettings(); }));
+
+		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setName('Feed URLs')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setDesc('RSS/Atom feed URLs for /intake — one per line.')
+			.addTextArea(text => text
+				.setPlaceholder('https://example.com/feed.xml')
+				.setValue(this.plugin.settings.feedUrls)
+				.onChange(async (value) => {
+					this.plugin.settings.feedUrls = value;
+					await this.plugin.saveSettings();
+				}));
+
 		// ── Vizier data folders ────────────────────────────────────────────
 
+		// eslint-disable-next-line obsidianmd/settings-tab/no-problematic-settings-headings
 		new Setting(containerEl).setName('Vizier data folders').setHeading();
 
 		new Setting(containerEl)
 			.setName('Inbox folder')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Where Vizier writes autonomous outputs (briefings, drafted notes, etc.).')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('Vizier/Inbox')
 				.setValue(this.plugin.settings.inboxFolder)
 				.onChange(async (value) => {
@@ -465,6 +500,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Contradictions folder')
 			.setDesc('Where contradiction flags are written by the background contradiction engine.')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('Vizier/Contradictions')
 				.setValue(this.plugin.settings.contradictionsFolder)
 				.onChange(async (value) => {
@@ -476,6 +512,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.setName('Skills folder')
 			.setDesc('Where distilled research procedure skills are stored.')
 			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setPlaceholder('Vizier/Skills')
 				.setValue(this.plugin.settings.skillsFolder)
 				.onChange(async (value) => {
