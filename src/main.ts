@@ -9,6 +9,7 @@ import { executeSocratic, executeReflection, executeFreewrite, executeSources } 
 import { promptModal } from './ui/PromptModal';
 import { mapReduceSummarize } from './utils/chunking';
 import { initTraces } from './traces';
+import { initDebugLog, setDebugLogging } from './debug_log';
 import { warmCapabilities, buildLLMConfig } from './llm_core';
 import { invalidateVaultCache } from './agent/prompt_builder';
 import { setAgentVaultIndex, setAgentPluginDir, setAgentMemoryManager } from './agent/tool_execution';
@@ -53,6 +54,8 @@ export default class VizierPlugin extends Plugin {
 
 		// ── Phase 0: initialise observability ─────────────────────────
 		initTraces(pluginDir);
+		initDebugLog(pluginDir);
+		setDebugLogging(this.settings.features.debugLog ?? false);
 
 		// ── Phase 0: warm capability cache for all configured models ──
 		void warmCapabilities(buildLLMConfig(this.settings));
@@ -74,7 +77,11 @@ export default class VizierPlugin extends Plugin {
 					if (done % 20 === 0) updateActivity('reindex', `${done}/${total} notes`);
 				})
 					.then(r => {
-						if (r.chunksAdded > 0) endActivity('reindex', true, `Vault index updated (${r.chunksAdded} new chunks)`);
+						if (r.aborted) endActivity('reindex', false, `Vault index stopped — embeddings failing (${r.embedFailures} chunks)`);
+						else if (r.chunksAdded > 0) {
+							const failNote = r.embedFailures > 0 ? ` (${r.embedFailures} chunks failed)` : '';
+							endActivity('reindex', true, `Vault index updated (${r.chunksAdded} new chunks)${failNote}`);
+						}
 						else endActivity('reindex', true, undefined, true); // nothing changed — vanish quietly
 					})
 					.catch((err: unknown) => {
@@ -160,10 +167,11 @@ export default class VizierPlugin extends Plugin {
 					if (done % 10 === 0) updateActivity('reindex', `${done}/${total} notes`);
 				})
 					.then((r) => {
-						endActivity('reindex', r.embedFailures === 0, `Vault index rebuilt (${r.chunksAdded} chunks added)`);
+						endActivity('reindex', !r.aborted, r.aborted ? 'Vault index stopped — embeddings failing' : `Vault index rebuilt (${r.chunksAdded} chunks added)`);
 						const stats = this.vaultIndex?.getStats();
 						const failNote = r.embedFailures > 0 ? ` (${r.embedFailures} chunks failed to embed)` : '';
-						new Notice(`Vault index rebuilt: ${stats?.total_chunks ?? 0} chunks from ${stats?.total_files ?? 0} notes.${failNote}`, 8000);
+						const abortNote = r.aborted ? ' — stopped early: embeddings failing, check Ollama and the embedding model' : '';
+						new Notice(`Vault index rebuilt: ${stats?.total_chunks ?? 0} chunks from ${stats?.total_files ?? 0} notes.${failNote}${abortNote}`, 8000);
 					})
 					.catch((err: unknown) => {
 						endActivity('reindex', false, 'Vault index failed');

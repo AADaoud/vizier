@@ -26,6 +26,10 @@ import { buildLLMConfig, getEmbedding, cosineSimilarity } from '../llm_core';
 import type { AIAgentSettings } from '../settings';
 import { recordRun } from '../traces';
 
+// Stop a reindex after this many consecutive chunk-embedding failures — the
+// embedding host is effectively down, so further attempts only waste time.
+const ABORT_AFTER_CONSECUTIVE_FAILURES = 12;
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface IndexChunk {
@@ -49,6 +53,8 @@ export interface ReindexStats {
 	files: number;
 	chunksAdded: number;
 	embedFailures: number;
+	/** True when the run was stopped early because embeddings kept failing. */
+	aborted: boolean;
 }
 
 // ── BM25 implementation ────────────────────────────────────────────────────
@@ -239,6 +245,8 @@ export class VaultIndex {
 		const files = app.vault.getMarkdownFiles();
 		let chunksAdded   = 0;
 		let embedFailures = 0;
+		let consecutiveFailures = 0; // resets on any successful chunk
+		let aborted = false;
 
 		for (let i = 0; i < files.length; i++) {
 			const file = files[i];
@@ -248,12 +256,23 @@ export class VaultIndex {
 				const r = await this.indexFile(file, app, settings);
 				chunksAdded   += r.added;
 				embedFailures += r.failed;
-			} catch { embedFailures++; }
+				if (r.added > 0)      consecutiveFailures = 0;
+				else if (r.failed > 0) consecutiveFailures += r.failed;
+			} catch { embedFailures++; consecutiveFailures++; }
+
+			// Circuit-breaker: if embeddings keep failing, stop rather than
+			// grinding through (and log-spamming) every remaining file.
+			if (consecutiveFailures >= ABORT_AFTER_CONSECUTIVE_FAILURES) {
+				aborted = true;
+				break;
+			}
 		}
 
 		if (this.dirty) this.save();
-		recordRun({ kind: 'vault_index', duration_ms: Date.now() - start, ok: embedFailures === 0, notes_touched: files.length, chunks_added: chunksAdded, embed_failures: embedFailures });
-		return { files: files.length, chunksAdded, embedFailures };
+		// A completed run is a success even if some chunks failed — only an
+		// early abort (embeddings effectively down) counts as a failed run.
+		recordRun({ kind: 'vault_index', duration_ms: Date.now() - start, ok: !aborted, notes_touched: files.length, chunks_added: chunksAdded, embed_failures: embedFailures, aborted });
+		return { files: files.length, chunksAdded, embedFailures, aborted };
 	}
 
 	// ── Search ────────────────────────────────────────────────────────

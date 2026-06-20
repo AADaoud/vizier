@@ -11,6 +11,7 @@ import {
 	FindCandidate,
 } from '../commands/slashCommands';
 import '../commands/registerAll';
+import { categoryEnabled } from '../commands/categories';
 import { dispatch, CommandContext } from '../commands/registry';
 import { runAgentLoop, type AgentEvent } from '../agent/loop';
 import type { MemoryManager } from '../memory/memory_manager';
@@ -264,9 +265,10 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 
 	// ── Command picker ─────────────────────────────────────────────────
 	const commandFilter = getCommandFilter(input);
+	const enabledCommands = SLASH_COMMANDS.filter(c => categoryEnabled(c.category, settings.commandModules));
 	const visibleCommands: SlashCommand[] =
 		commandFilter !== null
-			? SLASH_COMMANDS.filter(c => c.id.startsWith(commandFilter.toLowerCase()))
+			? enabledCommands.filter(c => c.id.startsWith(commandFilter.toLowerCase()))
 			: [];
 	const showPicker = visibleCommands.length > 0;
 	useEffect(() => { setPickerIndex(0); }, [commandFilter]);
@@ -572,7 +574,12 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 				},
 			};
 
-			const promise = dispatch(parsed.id, parsed.args, ctx);
+			// A command whose group is switched off behaves like an unknown one:
+			// skip dispatch and let it fall through to the agent as free text.
+			const matchedCmd = SLASH_COMMANDS.find(c => c.id === parsed.id);
+			const groupDisabled = matchedCmd ? !categoryEnabled(matchedCmd.category, settings.commandModules) : false;
+
+			const promise = groupDisabled ? null : dispatch(parsed.id, parsed.args, ctx);
 			if (promise !== null) {
 				setCommandLoading(true);
 				try { await promise; }
@@ -580,8 +587,8 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 				return;
 			}
 
-			// Unknown slash command — let the agent handle it as free text
-			// (removes the hard "Unknown command" error for agent-era usage)
+			// Unknown or disabled slash command — let the agent handle it as free
+			// text (removes the hard "Unknown command" error for agent-era usage)
 		}
 
 		// Free-form message → agent loop (or legacy streaming if feature is off)

@@ -89,6 +89,8 @@ export async function buildActiveNoteBlock(app: App): Promise<LLMMessage | null>
 interface VaultSnapshot {
 	totalNotes: number;
 	byFolder: Record<string, number>;
+	/** Top-level folders with note counts — the directory map for write/search targeting. */
+	topFolders: Record<string, number>;
 	recentNotes: string[];
 }
 
@@ -131,6 +133,7 @@ function buildVaultSnapshot(app: App, settings: AIAgentSettings): VaultSnapshot 
 	return {
 		totalNotes: files.length,
 		byFolder: entityFolderCounts,
+		topFolders,
 		recentNotes: recent.slice(0, 8).map(r => r.name),
 	};
 }
@@ -139,7 +142,7 @@ let _vaultStateCache: { key: string; msg: LLMMessage } | null = null;
 
 export function buildVaultStateBlock(app: App, settings: AIAgentSettings): LLMMessage {
 	const snap = buildVaultSnapshot(app, settings);
-	const cacheKey = JSON.stringify({ total: snap.totalNotes, folders: snap.byFolder });
+	const cacheKey = JSON.stringify({ total: snap.totalNotes, folders: snap.byFolder, top: snap.topFolders });
 
 	if (_vaultStateCache?.key === cacheKey) return _vaultStateCache.msg;
 
@@ -148,10 +151,21 @@ export function buildVaultStateBlock(app: App, settings: AIAgentSettings): LLMMe
 		.map(([f, n]) => `  ${f}: ${n} notes`)
 		.join('\n');
 
+	// Top-level directory map — tells the model where notes live so read_note,
+	// write_note, edit_note and vault_search can target a folder deliberately.
+	const topFolderLines = Object.entries(snap.topFolders)
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, 15)
+		.map(([f, n]) => `  ${f === '/' ? '(vault root)' : f}: ${n} notes`)
+		.join('\n');
+
 	const msg: LLMMessage = {
 		role: 'system',
 		content: [
 			`VAULT STATE: ${snap.totalNotes} notes total.`,
+			'',
+			'Top-level folders (use these to target read/write/edit/search):',
+			topFolderLines || '  (none)',
 			'',
 			'Human Network folders:',
 			folderLines || '  (none)',

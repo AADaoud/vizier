@@ -71,14 +71,24 @@ const KNOWN_WINDOWS: Record<string, number> = {
 	'nomic-embed-text': 8192, 'all-minilm': 512, 'all-minilm:l6-v2': 512,
 };
 
+const _windows = new Map<string, number>();
+
 export async function getContextWindow(ollamaUrl: string, model: string): Promise<number> {
-	// Exact match
+	const cached = _windows.get(model);
+	if (cached) return cached;
+
+	const resolved = await resolveContextWindow(ollamaUrl, model);
+	_windows.set(model, resolved);
+	return resolved;
+}
+
+async function resolveContextWindow(ollamaUrl: string, model: string): Promise<number> {
+	// 1. Exact known value
 	if (KNOWN_WINDOWS[model]) return KNOWN_WINDOWS[model];
-	// Prefix match (strip tag)
-	const base = model.split(':')[0] ?? model;
-	const entry = Object.entries(KNOWN_WINDOWS).find(([k]) => k.startsWith(base + ':') || k === base);
-	if (entry) return entry[1];
-	// Query Ollama
+
+	// 2. Authoritative: ask Ollama directly. This must run BEFORE the prefix
+	//    heuristic — otherwise e.g. "gemma4:31b-cloud" prefix-matches the first
+	//    "gemma4:*" entry (e2b → 32768) and we badly underreport a 256k window.
 	try {
 		const resp = await requestUrl({
 			url: `${ollamaUrl}/api/show`,
@@ -96,8 +106,36 @@ export async function getContextWindow(ollamaUrl: string, model: string): Promis
 				}
 			}
 		}
-	} catch { /* fall through */ }
+	} catch { /* fall through to heuristic */ }
+
+	// 3. Heuristic prefix match — last resort when Ollama can't tell us.
+	const base = model.split(':')[0] ?? model;
+	const entry = Object.entries(KNOWN_WINDOWS).find(([k]) => k.startsWith(base + ':') || k === base);
+	if (entry) return entry[1];
+
 	return 8192;
+}
+
+// ── Context-scaled output budgets ──────────────────────────────────────────
+// Tool outputs were historically capped at fixed 6k/10k chars — sensible for an
+// 8k-window model, but <1% of a 256k window. These budgets scale the caps to the
+// model's actual window so large-context models stop needlessly truncating a
+// note or search result, while floors preserve the old behaviour on small models.
+
+/** Inverse of estimateTokens' 0.3 tokens/char heuristic (~3.3 chars/token). */
+const CHARS_PER_TOKEN = 3.3;
+
+export interface ContextCharBudget {
+	/** Max chars a single read_note returns. */
+	readNoteChars: number;
+	/** Max chars of any one tool output injected back into the conversation. */
+	toolResultChars: number;
+}
+
+export function contextCharBudget(contextWindow: number): ContextCharBudget {
+	const readNoteChars   = Math.max(6_000,  Math.round(contextWindow * 0.25 * CHARS_PER_TOKEN));
+	const toolResultChars = Math.max(10_000, Math.round(contextWindow * 0.30 * CHARS_PER_TOKEN));
+	return { readNoteChars, toolResultChars };
 }
 
 // ── Installed-model resolution ────────────────────────────────────────────
@@ -413,6 +451,17 @@ export interface EmbeddingResult {
 	model: string;
 }
 
+// Embeddings get a few quick retries before a failure counts toward the
+// dead-host cooldown. On a synced vault, file-sync bursts fire many concurrent
+// embed calls and the embedding model may need a moment to load — a single
+// transient blip should not trip the 20s cooldown and cascade an entire reindex.
+const EMBED_ATTEMPTS   = 3;
+const EMBED_BACKOFF_MS  = 400;
+
+function sleep(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /** Get a text embedding from the embedding-role model. */
 export async function getEmbedding(
 	cfg: LLMCoreConfig,
@@ -429,23 +478,34 @@ export async function getEmbedding(
 			continue;
 		}
 		const key = `${ep}:${model}`;
-		if (inCooldown(key)) continue;
-		try {
-			const resp = await requestUrl({
-				url: `${ep}/api/embeddings`,
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ model, prompt: text }),
-				throw: false,
-			});
-			if (resp.status >= 400) throw new Error(`HTTP ${resp.status}`);
-			const data = resp.json as { embedding?: number[] };
-			if (!data.embedding?.length) throw new Error('Empty embedding response');
-			markOk(key);
-			return { vector: data.embedding, model };
-		} catch (err) {
-			markFail(key);
-			lastErr = err instanceof Error ? err : new Error(String(err));
+		if (inCooldown(key)) {
+			lastErr = new Error(`Embedding model "${model}" is cooling down after repeated failures`);
+			continue;
+		}
+
+		// Retry transient failures before marking the host dead.
+		for (let attempt = 0; attempt < EMBED_ATTEMPTS; attempt++) {
+			try {
+				const resp = await requestUrl({
+					url: `${ep}/api/embeddings`,
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ model, prompt: text }),
+					throw: false,
+				});
+				if (resp.status >= 400) throw new Error(`HTTP ${resp.status}`);
+				const data = resp.json as { embedding?: number[] };
+				if (!data.embedding?.length) throw new Error('Empty embedding response');
+				markOk(key);
+				return { vector: data.embedding, model };
+			} catch (err) {
+				lastErr = err instanceof Error ? err : new Error(String(err));
+				if (attempt < EMBED_ATTEMPTS - 1) {
+					await sleep(EMBED_BACKOFF_MS * (attempt + 1)); // 400ms, 800ms
+				} else {
+					markFail(key); // only count a hard failure after all retries
+				}
+			}
 		}
 	}
 	throw lastErr ?? new Error('No embedding models available');

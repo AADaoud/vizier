@@ -27,6 +27,7 @@ import {
 	callStreaming,
 	estimateTokens,
 	getContextWindow,
+	contextCharBudget,
 } from '../llm_core';
 import {
 	buildSystemPrompt,
@@ -49,12 +50,14 @@ import {
 	type CompactionSummary,
 } from '../schemas/index';
 import { recordRun } from '../traces';
+import { startDebugTurn } from '../debug_log';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MAX_ROUNDS        = 12;
-const TOOL_RESULT_CAP   = 10_000; // chars — truncate verbose tool outputs
 const COMPACTION_THRESH = 0.85;   // compact when >85% of context window used
+// Tool-output char caps are no longer fixed — see contextCharBudget(), which
+// scales them to the model's actual context window.
 
 // ── Event types ────────────────────────────────────────────────────────────
 
@@ -192,6 +195,7 @@ export async function runAgentLoop(
 	let   errorMsg   = '';
 	let   verifierResult: string | undefined;
 	let   anyFallback = false;
+	const dbg        = startDebugTurn('agent', userMessage);
 
 	// Collect recent user messages for keyword-based tool selection
 	const recentUserMsgs = [
@@ -199,6 +203,13 @@ export async function runAgentLoop(
 		userMessage,
 	];
 	const selectedTools = selectTools(recentUserMsgs);
+
+	dbg.log('Request', {
+		userMessage,
+		history_messages: history.length,
+		selected_tools: selectedTools.map(t => t.name),
+		memories: memories.length,
+	});
 
 	// Learned skills matching this request (Phase 5)
 	let skillsMarkdown = '';
@@ -221,6 +232,20 @@ export async function runAgentLoop(
 	const primaryModel = cfg.roles.default.models[0] ?? 'gemma3:4b';
 	const contextWindow = await getContextWindow(cfg.ollamaUrl, primaryModel);
 	onEvent({ type: 'meta', model: primaryModel });
+
+	// Char caps scaled to this model's context window (see contextCharBudget).
+	const { readNoteChars, toolResultChars } = contextCharBudget(contextWindow);
+
+	if (dbg.active) {
+		dbg.log('Model', {
+			model: primaryModel,
+			context_window: contextWindow,
+			read_note_chars: readNoteChars,
+			tool_result_chars: toolResultChars,
+			skills: skillsMarkdown ? 'matched' : 'none',
+		});
+		dbg.log('System prompt', systemMessages.map(m => m.content).join('\n\n'));
+	}
 
 	// Assemble the conversation so far
 	let messages: LLMMessage[] = [
@@ -281,10 +306,18 @@ export async function runAgentLoop(
 
 			onEvent({ type: 'round_end', round });
 
+			dbg.log(`Round ${round} decision`, {
+				used_fallback: usedFallback,
+				reasoning: toolList.reasoning,
+				done: toolList.done,
+				calls: toolList.calls,
+			});
+
 			// ── Loop-breaker ───────────────────────────────────────────
 			const currentToolKeys = new Set(toolList.calls.map(c => toolCallKey(c.name, c.params)));
 			const allRepeat = toolList.calls.length > 0 && toolList.calls.every(c => lastToolKeys.has(toolCallKey(c.name, c.params)));
 			if (allRepeat) {
+				dbg.log(`Round ${round} loop-breaker fired`, { repeated_calls: toolList.calls });
 				forceProseRound = true;
 				messages.push({
 					role: 'user',
@@ -302,6 +335,7 @@ export async function runAgentLoop(
 				if (err) {
 					const msg = `${err.error}${err.missing ? ` — missing params: ${err.missing.join(', ')}` : ''}`;
 					toolResultLines.push(`TOOL ${call.name} ERROR: ${msg}`);
+					dbg.log(`Tool rejected: ${call.name}`, { params: call.params, error: msg });
 					onEvent({ type: 'tool_result', name: call.name, preview: `Error: ${err.error}`, output: msg, ok: false, duration_ms: 0 });
 					return false;
 				}
@@ -311,16 +345,21 @@ export async function runAgentLoop(
 			for (const call of validCalls) {
 				onEvent({ type: 'tool_start', name: call.name, params: call.params });
 
-				const result = await executeTool(call, app, settings);
+				const result = await executeTool(call, app, settings, { readNoteChars });
+
+				dbg.log(`Tool ${result.ok ? 'ok' : 'error'}: ${call.name} (${result.duration_ms}ms)`, {
+					params: call.params,
+					output: result.output,
+				});
 
 				const preview = result.output.slice(0, 120).replace(/\n/g, ' ');
 				onEvent({ type: 'tool_result', name: call.name, preview, output: result.output.slice(0, 4000), ok: result.ok, duration_ms: result.duration_ms });
 
 				if (!toolsUsed.includes(call.name)) toolsUsed.push(call.name);
 
-				// Cap verbose output
-				const capped = result.output.length > TOOL_RESULT_CAP
-					? result.output.slice(0, TOOL_RESULT_CAP) + `\n[… output capped at ${TOOL_RESULT_CAP} chars]`
+				// Cap verbose output (scaled to the context window)
+				const capped = result.output.length > toolResultChars
+					? result.output.slice(0, toolResultChars) + `\n[… output capped at ${toolResultChars} chars]`
 					: result.output;
 
 				toolResultLines.push(`TOOL ${call.name} ${result.ok ? 'SUCCESS' : 'ERROR'}:\n${capped}`);
@@ -342,13 +381,15 @@ export async function runAgentLoop(
 		}
 
 		// ── Stream final prose response ────────────────────────────────
+		let finalText = '';
 		await callStreaming(
 			cfg,
 			'default',
 			messages,
 			{ temperature: 0.7 },
-			token => onEvent({ type: 'token', content: token })
+			token => { finalText += token; onEvent({ type: 'token', content: token }); }
 		);
+		dbg.log('Final response', finalText);
 
 		invalidateVaultCache(); // vault may have changed if notes were written
 
@@ -363,6 +404,7 @@ export async function runAgentLoop(
 			try {
 				const verdict = await verifyRun(cfg, userMessage, transcript());
 				verifierResult = verdict.result;
+				dbg.log('Verifier verdict', verdict);
 				endActivity('verify', verdict.result !== 'BLOCKED',
 					verdict.result === 'SUCCESS' ? 'Work verified'
 						: verdict.result === 'RETRY' ? 'Issues found — correcting'
@@ -386,10 +428,10 @@ export async function runAgentLoop(
 					for (const call of fix.calls.slice(0, 5)) {
 						if (validateParams(call)) continue;
 						onEvent({ type: 'tool_start', name: call.name, params: call.params });
-						const r = await executeTool(call, app, settings);
+						const r = await executeTool(call, app, settings, { readNoteChars });
 						onEvent({ type: 'tool_result', name: call.name, preview: r.output.slice(0, 120).replace(/\n/g, ' '), output: r.output.slice(0, 4000), ok: r.ok, duration_ms: r.duration_ms });
 						if (!toolsUsed.includes(call.name)) toolsUsed.push(call.name);
-						fixResults.push(`TOOL ${call.name} ${r.ok ? 'SUCCESS' : 'ERROR'}:\n${r.output.slice(0, TOOL_RESULT_CAP)}`);
+						fixResults.push(`TOOL ${call.name} ${r.ok ? 'SUCCESS' : 'ERROR'}:\n${r.output.slice(0, toolResultChars)}`);
 					}
 
 					if (fixResults.length > 0) {
@@ -420,8 +462,10 @@ export async function runAgentLoop(
 	} catch (err) {
 		ok = false;
 		errorMsg = err instanceof Error ? err.message : String(err);
+		dbg.log('ERROR', { message: errorMsg, stack: err instanceof Error ? err.stack : undefined });
 		onEvent({ type: 'error', message: errorMsg });
 	} finally {
+		dbg.end('done', { ok, rounds: round, tools_used: toolsUsed, fallback: anyFallback, verifier: verifierResult, duration_ms: Date.now() - startTime });
 		recordRun({
 			kind: 'agent',
 			model: primaryModel,

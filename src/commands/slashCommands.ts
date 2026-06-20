@@ -5,12 +5,15 @@ import { Prompts } from '../prompts';
 import { ClipLearnModal } from '../ui/ClipLearnModal';
 import { sanitizeFilename, sanitizeTag, buildYamlTags, today } from '../utils/noteBuilder';
 import { AIAgentSettings } from '../settings';
+import type { CommandCategory } from './categories';
 
 export interface SlashCommand {
 	id: string;
 	label: string;
 	description: string;
 	template: string;
+	/** Group this command belongs to — drives the per-group toggles in settings. */
+	category: CommandCategory;
 }
 
 export interface CommandConfig {
@@ -35,198 +38,231 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		label: '/write',
 		description: 'Create a new AI-generated note',
 		template: '/write ',
+		category: 'core',
 	},
 	{
 		id: 'edit',
 		label: '/edit',
 		description: 'Edit the active note with an AI instruction',
 		template: '/edit ',
+		category: 'core',
 	},
 	{
 		id: 'find',
 		label: '/find',
 		description: 'Find notes using natural language',
 		template: '/find ',
+		category: 'core',
 	},
 	{
 		id: 'summarize',
 		label: '/summarize',
 		description: 'Summarize a YouTube video or article from a URL',
 		template: '/summarize ',
+		category: 'webMedia',
 	},
 	{
 		id: 'clip',
 		label: '/clip',
 		description: 'Fetch a URL, summarize it, and save to your Clips folder',
 		template: '/clip ',
+		category: 'webMedia',
 	},
 	{
 		id: 'clip long',
 		label: '/clip long',
 		description: 'Clip and save detailed notes — ideal for lectures or classes',
 		template: '/clip long ',
+		category: 'webMedia',
 	},
 	{
 		id: 'clip learn',
 		label: '/clip learn',
 		description: 'Clip a URL, save detailed notes, and generate an interactive study guide',
 		template: '/clip learn ',
+		category: 'webMedia',
 	},
 	{
 		id: 'read',
 		label: '/read',
 		description: 'Summarize or ask a question about the active note',
 		template: '/read ',
+		category: 'core',
 	},
 	{
 		id: 'handwriting',
 		label: '/handwriting',
 		description: 'Paste a handwritten note image — transcribes and saves with AI',
 		template: '/handwriting',
+		category: 'webMedia',
 	},
 	{
 		id: 'person',
 		label: '/person',
 		description: 'Create a person note — searches Wikipedia or manual entry',
 		template: '/person ',
+		category: 'humanNetwork',
 	},
 	{
 		id: 'event',
 		label: '/event',
 		description: 'Create a historical event note — searches Wikipedia or manual entry',
 		template: '/event ',
+		category: 'humanNetwork',
 	},
 	{
 		id: 'idea',
 		label: '/idea',
 		description: 'Create a geopolitical concept or theory note',
 		template: '/idea ',
+		category: 'humanNetwork',
 	},
 	{
 		id: 'link',
 		label: '/link',
 		description: 'Link two entities — e.g. /link Person | Event or /link A | B | relationship',
 		template: '/link ',
+		category: 'humanNetwork',
 	},
 	{
 		id: 'entity',
 		label: '/entity',
 		description: 'Create a note for any entity type — e.g. /entity organization | NATO',
 		template: '/entity ',
+		category: 'humanNetwork',
 	},
 	{
 		id: 'bridge',
 		label: '/bridge',
 		description: 'Find the shortest path between two Human Network entities — e.g. /bridge A | B',
 		template: '/bridge ',
+		category: 'humanNetwork',
 	},
 	{
 		id: 'timeline',
 		label: '/timeline',
 		description: 'Build a chronological timeline — e.g. /timeline Cold War or /timeline 1939..1945',
 		template: '/timeline ',
+		category: 'humanNetwork',
 	},
 	{
 		id: 'standardize',
 		label: '/standardize',
 		description: 'Add missing metadata to all notes in a folder — e.g. /standardize Clips',
 		template: '/standardize ',
+		category: 'synthesis',
 	},
 	{
 		id: 'socratic',
 		label: '/socratic',
 		description: 'Generate Socratic questions for the active note and capture your answers',
 		template: '/socratic',
+		category: 'synthesis',
 	},
 	{
 		id: 'recluster',
 		label: '/recluster',
 		description: 'Cluster notes in a folder into themes — e.g. /recluster Clips',
 		template: '/recluster ',
+		category: 'synthesis',
 	},
 	{
 		id: 'contradict',
 		label: '/contradict',
 		description: 'Find vault notes that contradict claims in the active note',
 		template: '/contradict',
+		category: 'epistemic',
 	},
 	{
 		id: 'sources',
 		label: '/sources',
 		description: 'Audit the active note for uncited factual claims',
 		template: '/sources',
+		category: 'epistemic',
 	},
 	{
 		id: 'thesis',
 		label: '/thesis',
 		description: 'Build a structured thesis from tagged notes — e.g. /thesis BTC',
 		template: '/thesis ',
+		category: 'synthesis',
 	},
 	{
 		id: 'weekly',
 		label: '/weekly',
 		description: 'Generate a weekly reflection scaffold from notes modified this week',
 		template: '/weekly',
+		category: 'reflection',
 	},
 	{
 		id: 'monthly',
 		label: '/monthly',
 		description: 'Generate a monthly reflection scaffold from notes modified this month',
 		template: '/monthly',
+		category: 'reflection',
 	},
 	{
 		id: 'freewrite',
 		label: '/freewrite',
 		description: 'Open a new timestamped blank note for free writing',
 		template: '/freewrite',
+		category: 'reflection',
 	},
 	{
 		id: 'ingest',
 		label: '/ingest',
 		description: 'Ingest a book or document chapter-by-chapter — e.g. /ingest Books/book.pdf',
 		template: '/ingest ',
+		category: 'webMedia',
 	},
 	{
 		id: 'transcribe',
 		label: '/transcribe',
 		description: 'Transcribe an audio file or podcast URL via Whisper',
 		template: '/transcribe ',
+		category: 'webMedia',
 	},
 	{
 		id: 'runstats',
 		label: '/runstats',
 		description: 'Show Vizier run statistics and model usage from the trace log',
 		template: '/runstats',
+		category: 'ops',
 	},
 	{
 		id: 'gaps',
 		label: '/gaps',
 		description: 'Analyze the vault for missing themes, entities, and readings',
 		template: '/gaps ',
+		category: 'epistemic',
 	},
 	{
 		id: 'intake',
 		label: '/intake',
 		description: 'Fetch and triage your RSS feeds against your interests',
 		template: '/intake',
+		category: 'ops',
 	},
 	{
 		id: 'briefing',
 		label: '/briefing',
 		description: 'Generate a daily briefing from intake, recent work, and open tensions',
 		template: '/briefing',
+		category: 'ops',
 	},
 	{
 		id: 'research',
 		label: '/research',
 		description: 'Deep research a topic: vault + Wikipedia + synthesis note with claims',
 		template: '/research ',
+		category: 'epistemic',
 	},
 	{
 		id: 'curriculum',
 		label: '/curriculum',
 		description: 'Build an ordered self-study curriculum for a topic',
 		template: '/curriculum ',
+		category: 'synthesis',
 	},
 ];
 

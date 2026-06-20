@@ -41,7 +41,7 @@ export const TOOLS: ToolDefinition[] = [
 		description: 'Semantic + keyword search across all vault notes.',
 		params: {
 			query:  { type: 'string', description: 'Natural-language or keyword query.' },
-			folder: { type: 'string', description: 'Optional: restrict search to this folder path.' },
+			folder: { type: 'string', description: 'Optional: restrict search to this folder and its subfolders (e.g. "Clips" or "Human Network/People").' },
 			limit:  { type: 'number', description: 'Max results (default 10, max 20).' },
 		},
 		required: ['query'],
@@ -49,6 +49,7 @@ export const TOOLS: ToolDefinition[] = [
 		alwaysAvailable: true,
 		doc: `vault_search — Quick semantic lookup across the vault.
 Use BEFORE claiming the vault lacks something.
+Pass folder to scope the search to one directory (and its subfolders) — see VAULT STATE for the folder map.
 Do NOT re-search for things already returned this turn.
 Pitfall: don't use this to read a note you already have in context.`,
 	},
@@ -57,29 +58,32 @@ Pitfall: don't use this to read a note you already have in context.`,
 		name: 'read_note',
 		description: 'Read the full content of a vault note by name or path.',
 		params: {
-			name: { type: 'string', description: 'Note basename (without .md) or full path.' },
+			name:   { type: 'string', description: 'Note basename (without .md) or full vault path (e.g. "Clips/My Note").' },
+			folder: { type: 'string', description: 'Optional: folder to disambiguate when several notes share the same basename.' },
 		},
 		required: ['name'],
 		keywords: ['read', 'open', 'show me', 'content of', 'what does'],
 		alwaysAvailable: true,
 		doc: `read_note — Read a vault note.
 Do NOT call this for the active note — its content is already in PROTECTED CONTEXT.
+Pass the full path as name, or set folder, when a basename is ambiguous (the tool will list candidates).
 Use vault_search first to confirm the note exists.`,
 	},
 
 	{
 		name: 'write_note',
-		description: 'Create a new vault note with given filename and content.',
+		description: 'Create a new vault note with given filename and content in a chosen directory.',
 		params: {
 			filename: { type: 'string', description: 'Filename without .md extension.' },
 			content:  { type: 'string', description: 'Full markdown content including frontmatter.' },
-			folder:   { type: 'string', description: 'Optional vault folder path.' },
+			folder:   { type: 'string', description: 'Target vault folder path, nested allowed (e.g. "Clips" or "Projects/2026"). Created if missing. Defaults to the configured AI notes folder.' },
 		},
 		required: ['filename', 'content'],
 		keywords: ['write', 'create', 'new note', 'make a note', 'save'],
 		alwaysAvailable: true,
-		doc: `write_note — Create a new vault note.
+		doc: `write_note — Create a new vault note in a specific directory.
 For content >15 lines, always use this — never put that much in chat.
+Choose folder deliberately: put the note where similar notes live (see the folder map in VAULT STATE). Omit folder only to use the default.
 Include YAML frontmatter with type, created, and tags fields.
 Returns the created [[wikilink]] to emit in your response.`,
 	},
@@ -88,7 +92,8 @@ Returns the created [[wikilink]] to emit in your response.`,
 		name: 'edit_note',
 		description: 'Apply targeted FIND/REPLACE edits to an existing vault note.',
 		params: {
-			name:    { type: 'string', description: 'Note basename or path.' },
+			name:    { type: 'string', description: 'Note basename or full vault path.' },
+			folder:  { type: 'string', description: 'Optional: folder to disambiguate when several notes share the same basename.' },
 			find:    { type: 'string', description: 'Exact string to find (must be unique in the note).' },
 			replace: { type: 'string', description: 'Replacement string.' },
 		},
@@ -97,6 +102,7 @@ Returns the created [[wikilink]] to emit in your response.`,
 		alwaysAvailable: true,
 		doc: `edit_note — FIND/REPLACE edit on an existing note.
 Prefer this over write_note when changing <50% of the content.
+Pass the full path as name, or set folder, when a basename is ambiguous (the tool will list candidates).
 The find string must be unique in the note — if ambiguous, use more surrounding context.
 For the active note, the content is already in context so you know what to find.`,
 	},

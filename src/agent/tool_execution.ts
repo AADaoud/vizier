@@ -188,23 +188,50 @@ async function handleVaultSearch(
 	void addMessage; void replaceMessage; void addFindResults; void cfg;
 }
 
-async function handleReadNote(params: Record<string, unknown>, app: App): Promise<string> {
+const DEFAULT_READ_NOTE_CHARS = 6000;
+
+/**
+ * Resolve a note from a basename or full path, optionally scoped to a folder.
+ * An exact path always wins. A bare basename is matched (and narrowed to
+ * `folder` and its subfolders when given); if it still matches several notes,
+ * the candidates are returned as an error so the model can disambiguate rather
+ * than silently editing/reading the wrong one.
+ */
+export function resolveNoteTarget(app: App, name: string, folder = ''): { file?: TFile; error?: string } {
+	const files = app.vault.getMarkdownFiles();
+
+	// Exact path (with or without the .md suffix) — most specific.
+	const exact = files.find(f => f.path === name || f.path === name + '.md');
+	if (exact) return { file: exact };
+
+	// Basename match, optionally scoped to a folder (and its subfolders).
+	const lower = name.toLowerCase().replace(/\.md$/, '');
+	let matches = files.filter(f => f.basename.toLowerCase() === lower);
+	if (folder) {
+		matches = matches.filter(f => f.parent?.path === folder || f.path.startsWith(folder + '/'));
+	}
+
+	if (matches.length === 0) {
+		return { error: `Note not found: "${name}"${folder ? ` in folder "${folder}"` : ''}. Try vault_search first.` };
+	}
+	if (matches.length > 1) {
+		const list = matches.slice(0, 10).map(f => `  - ${f.path}`).join('\n');
+		return { error: `"${name}" is ambiguous — ${matches.length} notes share this basename:\n${list}\n\nRe-call with the full path as "name", or set "folder" to pick one.` };
+	}
+	return { file: matches[0] };
+}
+
+async function handleReadNote(params: Record<string, unknown>, app: App, maxChars = DEFAULT_READ_NOTE_CHARS): Promise<string> {
 	const name = str(params, 'name');
 	if (!name) return 'ERROR: read_note requires a name parameter.';
 
-	const files = app.vault.getMarkdownFiles();
-	const file = files.find(f =>
-		f.basename.toLowerCase() === name.toLowerCase() ||
-		f.path === name ||
-		f.path === name + '.md'
-	);
-
-	if (!file) return `Note not found: "${name}". Try vault_search first.`;
+	const { file, error } = resolveNoteTarget(app, name, str(params, 'folder'));
+	if (error || !file) return error ?? `Note not found: "${name}".`;
 
 	try {
 		const content = await app.vault.cachedRead(file);
-		const preview = content.length > 6000
-			? content.slice(0, 6000) + '\n\n[… truncated at 6000 chars — use edit_note to modify specific sections]'
+		const preview = content.length > maxChars
+			? content.slice(0, maxChars) + `\n\n[… truncated at ${maxChars} chars — use edit_note to modify specific sections]`
 			: content;
 		return `## [[${file.basename}]]\n\n${preview}`;
 	} catch (err) {
@@ -243,13 +270,8 @@ async function handleEditNote(params: Record<string, unknown>, app: App): Promis
 	if (!find)    return 'ERROR: edit_note requires a find parameter.';
 	if (replace === '') return 'ERROR: edit_note requires a replace parameter (use a space character to effectively delete).';
 
-	const files = app.vault.getMarkdownFiles();
-	const file = files.find(f =>
-		f.basename.toLowerCase() === name.toLowerCase() ||
-		f.path === name ||
-		f.path === name + '.md'
-	);
-	if (!file) return `Note not found: "${name}".`;
+	const { file, error } = resolveNoteTarget(app, name, str(params, 'folder'));
+	if (error || !file) return error ?? `Note not found: "${name}".`;
 
 	try {
 		const content = await app.vault.cachedRead(file);
@@ -773,10 +795,16 @@ export interface ToolResult {
 	duration_ms: number;
 }
 
+export interface ToolExecOptions {
+	/** Char budget for read_note output — scaled to the model's context window. */
+	readNoteChars?: number;
+}
+
 export async function executeTool(
 	call: ToolCall,
 	app: App,
-	settings: AIAgentSettings
+	settings: AIAgentSettings,
+	opts: ToolExecOptions = {}
 ): Promise<ToolResult> {
 	const start = Date.now();
 	const cfg: CommandConfig = {
@@ -792,7 +820,7 @@ export async function executeTool(
 				output = await handleVaultSearch(call.params, app, settings, cfg);
 				break;
 			case 'read_note':
-				output = await handleReadNote(call.params, app);
+				output = await handleReadNote(call.params, app, opts.readNoteChars);
 				break;
 			case 'write_note':
 				output = await handleWriteNote(call.params, app, settings);

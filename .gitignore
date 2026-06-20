@@ -26,6 +26,8 @@ data.json
 vault_index.json
 vizier_runs.jsonl
 vizier_runs.jsonl.1
+vizier_debug.log
+vizier_debug.log.1
 memories.json
 contradiction_state.json
 intake_state.json

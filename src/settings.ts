@@ -1,5 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import VizierPlugin from './main';
+import { setDebugLogging } from './debug_log';
+import { COMMAND_CATEGORIES, DEFAULT_COMMAND_MODULES, type ToggleableCategory } from './commands/categories';
 
 // ── Role-based model routing ───────────────────────────────────────────────
 
@@ -23,6 +25,8 @@ export interface FeatureFlags {
 	intake: boolean;
 	/** Daily briefing generation. */
 	briefing: boolean;
+	/** Verbose conversation-flow logging to vizier_debug.log for analysis. */
+	debugLog: boolean;
 }
 
 // ── Main settings interface ────────────────────────────────────────────────
@@ -62,6 +66,10 @@ export interface AIAgentSettings {
 
 	// ── New: feature flags ────────────────────────────────────────────
 	features: FeatureFlags;
+
+	// ── New: per-group command toggles ────────────────────────────────
+	/** Switch whole command groups off to declutter the slash picker. Core is always on. */
+	commandModules: Record<ToggleableCategory, boolean>;
 
 	// ── New: folder for Vizier-managed data notes ─────────────────────
 	/** Inbox folder where autonomous writes land (briefings, contradiction flags, etc.) */
@@ -108,7 +116,10 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 		memory:    true,
 		intake:    false,
 		briefing:  false,
+		debugLog:  false,
 	},
+
+	commandModules: { ...DEFAULT_COMMAND_MODULES },
 
 	inboxFolder:         'Vizier/Inbox',
 	contradictionsFolder:'Vizier/Contradictions',
@@ -464,6 +475,40 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.addToggle(t => t
 				.setValue(this.plugin.settings.features.briefing)
 				.onChange(async (v) => { this.plugin.settings.features.briefing = v; await this.plugin.saveSettings(); }));
+
+		new Setting(containerEl)
+			.setName('Debug logging')
+			.setDesc('Record detailed conversation flow — system prompt, each round\'s tool decisions, tool results, verifier verdict, final response, and errors — to vizier_debug.log in the plugin folder. For analysis; off by default.')
+			.addToggle(t => t
+				.setValue(this.plugin.settings.features.debugLog ?? false)
+				.onChange(async (v) => {
+					this.plugin.settings.features.debugLog = v;
+					setDebugLogging(v);
+					await this.plugin.saveSettings();
+				}));
+
+		// ── Command groups ─────────────────────────────────────────────
+		new Setting(containerEl).setName('Command groups').setHeading();
+		const groupsDesc = containerEl.createEl('p', {
+			text: 'Switch whole groups of slash commands off to declutter the chat picker. The core group (write, edit, find, read) is always available. Disabled commands fall through to the agent as normal text.',
+			cls: 'setting-item-description',
+		});
+		groupsDesc.style.marginTop = '0';
+
+		if (!this.plugin.settings.commandModules) {
+			this.plugin.settings.commandModules = { ...DEFAULT_COMMAND_MODULES };
+		}
+		for (const cat of COMMAND_CATEGORIES) {
+			new Setting(containerEl)
+				.setName(cat.label)
+				.setDesc(cat.desc)
+				.addToggle(t => t
+					.setValue(this.plugin.settings.commandModules[cat.id] !== false)
+					.onChange(async (v) => {
+						this.plugin.settings.commandModules[cat.id] = v;
+						await this.plugin.saveSettings();
+					}));
+		}
 
 		new Setting(containerEl)
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
