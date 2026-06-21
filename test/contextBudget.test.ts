@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { contextCharBudget, getContextWindow } from '../src/llm_core';
+import { contextCharBudget, getContextWindow, isCloudModel, effectiveContextWindow } from '../src/llm_core';
 import { requestUrl } from 'obsidian';
 
 // v0.7-only: llm_core has no v0.6.5 equivalent. Guards the window-detection fix
@@ -83,5 +83,41 @@ describe('getContextWindow()', () => {
 		expect(first).toBe(12345);
 		expect(second).toBe(12345);
 		expect(mockRequest).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('isCloudModel()', () => {
+	it('detects cloud models by the :cloud / -cloud suffix', () => {
+		expect(isCloudModel('gemma4:31b-cloud')).toBe(true);
+		expect(isCloudModel('minimax-m3:cloud')).toBe(true);
+		expect(isCloudModel('GPT-OSS:120B-CLOUD')).toBe(true); // case-insensitive
+	});
+
+	it('treats normal local models as not cloud', () => {
+		expect(isCloudModel('gemma3:4b')).toBe(false);
+		expect(isCloudModel('all-minilm:l6-v2')).toBe(false);
+		expect(isCloudModel('llama3.2')).toBe(false);
+	});
+});
+
+describe('effectiveContextWindow()', () => {
+	it('cloud models use their full architectural window (ignore local setting)', async () => {
+		mockRequest.mockResolvedValueOnce(showResp({ 'gemma4.context_length': 262144 }));
+		expect(await effectiveContextWindow('http://x', 'gemma4:31b-cloud', 8192)).toBe(262144);
+	});
+
+	it('local models are clamped to the configured local window', async () => {
+		mockRequest.mockResolvedValueOnce(showResp({ 'gemma3.context_length': 131072 }));
+		expect(await effectiveContextWindow('http://x', 'gemma3:4b', 8192)).toBe(8192);
+	});
+
+	it('local setting never exceeds the model max', async () => {
+		mockRequest.mockResolvedValueOnce(showResp({ 'tiny.context_length': 4096 }));
+		expect(await effectiveContextWindow('http://x', 'tiny:1b', 32768)).toBe(4096);
+	});
+
+	it('local setting of 0 means use the model max', async () => {
+		mockRequest.mockResolvedValueOnce(showResp({ 'big.context_length': 131072 }));
+		expect(await effectiveContextWindow('http://x', 'big:7b', 0)).toBe(131072);
 	});
 });

@@ -18,6 +18,7 @@ function cfg(): LLMCoreConfig {
 			research:  { models: ['m'] },
 			embedding: { models: ['all-minilm:l6-v2'] },
 		},
+		localContextWindow: 8192,
 	};
 }
 

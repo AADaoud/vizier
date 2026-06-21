@@ -48,6 +48,8 @@ export interface AIAgentSettings {
 	transcriptsFolder: string;
 	thesesFolder: string;
 	reclusterMaxNotes: number;
+	/** num_ctx for LOCAL Ollama models (cloud models always use their full window). 0 = use the model's max. */
+	localContextWindow: number;
 	whisperModel: string;
 	timelineFolders: string;
 	entitiesFolder: string;
@@ -100,6 +102,7 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 	transcriptsFolder: 'Transcripts',
 	thesesFolder: 'Theses',
 	reclusterMaxNotes: 100,
+	localContextWindow: 8192,
 	whisperModel: 'base',
 	timelineFolders: 'Human Network/Events, Human Network/People, Human Network/Ideas',
 	entitiesFolder: 'Human Network/Entities',
@@ -184,6 +187,19 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.defaultModel)
 				.onChange(async (value) => {
 					this.plugin.settings.defaultModel = value.trim() || DEFAULT_SETTINGS.defaultModel;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Local model context window (num_ctx)')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setDesc('Context size for local Ollama models. Larger means more context but more memory. Cloud models (names ending in -cloud) always use their full window and ignore this. 0 = use the model\'s maximum.')
+			.addText(text => text
+				.setPlaceholder('8192')
+				.setValue(String(this.plugin.settings.localContextWindow))
+				.onChange(async (value) => {
+					const n = parseInt(value.trim(), 10);
+					this.plugin.settings.localContextWindow = isNaN(n) || n < 0 ? DEFAULT_SETTINGS.localContextWindow : n;
 					await this.plugin.saveSettings();
 				}));
 

@@ -29,6 +29,8 @@ export interface LLMOptions {
 export interface LLMCoreConfig {
 	ollamaUrl: string;
 	roles: Record<ModelRole, { models: string[]; endpoint?: string }>;
+	/** num_ctx for local models; 0 = use the model's max. Cloud models ignore this. */
+	localContextWindow: number;
 }
 
 // ── Build config from plugin settings ────────────────────────────────────
@@ -45,7 +47,51 @@ export function buildLLMConfig(settings: AIAgentSettings): LLMCoreConfig {
 			research:  { models: saved.research?.models?.length  ? saved.research.models  : [fallback], endpoint: saved.research?.endpoint },
 			embedding: { models: saved.embedding?.models?.length ? saved.embedding.models : ['nomic-embed-text'], endpoint: saved.embedding?.endpoint },
 		},
+		localContextWindow: settings.localContextWindow ?? 8192,
 	};
+}
+
+// ── Cloud vs local models ───────────────────────────────────────────────────
+// Ollama cloud models are named "<model>:cloud" or "<model>:<size>-cloud". The
+// hosted provider manages context, so we never send num_ctx for them and use
+// their full window. Local models honor only the num_ctx we pass at request
+// time (Ollama's default is small), so we must set it explicitly.
+
+export function isCloudModel(model: string): boolean {
+	return /(?::|-)cloud$/.test(model.toLowerCase());
+}
+
+/**
+ * The window we will actually use for a model:
+ *   - cloud  → the model's full context_length (provider honors it)
+ *   - local  → localContextWindow (clamped to the model's max); 0 = use the max
+ * For local models this value is also sent as options.num_ctx so the model
+ * genuinely provides this much context rather than Ollama's small default.
+ */
+export async function effectiveContextWindow(
+	ollamaUrl: string,
+	model: string,
+	localContextWindow: number
+): Promise<number> {
+	const arch = await getContextWindow(ollamaUrl, model);
+	if (isCloudModel(model)) return arch;
+	if (localContextWindow > 0) return Math.min(localContextWindow, arch);
+	return arch;
+}
+
+/**
+ * Request `options` fragment carrying num_ctx for local models, empty for cloud.
+ * Spread into a request's `options` so local models actually use the configured
+ * window instead of Ollama's small default.
+ */
+async function localNumCtxOption(
+	cfg: LLMCoreConfig,
+	ollamaUrl: string,
+	model: string
+): Promise<Record<string, number>> {
+	if (isCloudModel(model)) return {};
+	const win = await effectiveContextWindow(ollamaUrl, model, cfg.localContextWindow);
+	return { num_ctx: win };
 }
 
 // ── Token estimation ──────────────────────────────────────────────────────
@@ -337,6 +383,9 @@ export async function callStructured<T>(
 		// Optimistically use format: true until proven otherwise
 		const useFormat = caps ? caps.structuredOutputs : true;
 
+		// Local models honor only the num_ctx we send; cloud models manage their own.
+		const ctxOpt = await localNumCtxOption(cfg, ep, model);
+
 		// think:false — structured output is consumed by code, not read; the
 		// thinking phase only adds latency and (for gemma4-class models) makes the
 		// forced JSON diverge from the reasoning. See Ollama issue #15386.
@@ -348,7 +397,7 @@ export async function callStructured<T>(
 				format: schema,
 				stream: false,
 				think: false,
-				options: { temperature: 0, ...opts },
+				options: { temperature: 0, ...ctxOpt, ...opts },
 			};
 		} else {
 			// Fallback: put the schema in the prompt (no format field — thinking
@@ -361,7 +410,7 @@ export async function callStructured<T>(
 					content: last.content + '\n\nRespond ONLY with valid JSON matching this schema: ' + JSON.stringify(schema),
 				};
 			}
-			body = { model, messages: msgs, stream: false, think: false, options: { temperature: 0, ...opts } };
+			body = { model, messages: msgs, stream: false, think: false, options: { temperature: 0, ...ctxOpt, ...opts } };
 		}
 
 		try {
@@ -427,6 +476,9 @@ export async function callStreaming(
 		const key = `${ep}:${model}`;
 		if (inCooldown(key)) continue;
 
+		// Local models honor only the num_ctx we send; cloud models manage their own.
+		const ctxOpt = await localNumCtxOption(cfg, ep, model);
+
 		try {
 			// eslint-disable-next-line no-restricted-globals
 			const response = await fetch(`${ep}/api/chat`, {
@@ -436,7 +488,7 @@ export async function callStreaming(
 					model,
 					messages,
 					stream: true,
-					options: { temperature: 0.7, ...opts },
+					options: { temperature: 0.7, ...ctxOpt, ...opts },
 				}),
 			});
 

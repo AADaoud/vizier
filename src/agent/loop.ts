@@ -26,7 +26,7 @@ import {
 	callStructured,
 	callStreaming,
 	estimateTokens,
-	getContextWindow,
+	effectiveContextWindow,
 	contextCharBudget,
 } from '../llm_core';
 import {
@@ -229,7 +229,7 @@ export async function runAgentLoop(
 
 	// Discover context window for this model
 	const primaryModel = cfg.roles.default.models[0] ?? 'gemma3:4b';
-	const contextWindow = await getContextWindow(cfg.ollamaUrl, primaryModel);
+	const contextWindow = await effectiveContextWindow(cfg.ollamaUrl, primaryModel, cfg.localContextWindow);
 	onEvent({ type: 'meta', model: primaryModel });
 
 	// Char caps scaled to this model's context window (see contextCharBudget).
