@@ -12,12 +12,26 @@
 | Feature | Entry point |
 |---|---|
 | Chat UI | `src/ui/ChatView.tsx` → `src/ui/ChatApp.tsx` |
-| Slash commands (`/write`, `/find`, `/clip`, `/clip long`, `/clip learn`, `/summarize`, `/read`, `/handwriting`) | `src/commands/slashCommands.ts` |
+| Agent loop (multi-round tool use, compaction, verifier, skills) | `src/agent/loop.ts` |
+| Tool schemas + selection / execution | `src/agent/tool_schemas.ts`, `src/agent/tool_execution.ts` |
+| Layered system prompt builder | `src/agent/prompt_builder.ts` |
+| LLM core: role routing, structured/streaming calls, context window, embeddings | `src/llm_core.ts` |
+| Structured-output schemas | `src/schemas/index.ts` |
+| Memory (durable user facts) | `src/memory/memory_manager.ts` |
+| Semantic vault index (chunk + embed + hybrid search) | `src/memory/vault_index.ts` |
+| Epistemics: claims + contradiction engine | `src/epistemic/claims.ts`, `src/epistemic/contradiction_engine.ts` |
+| Intake (RSS triage) + daily briefing | `src/intake/feeds.ts`, `src/intake/briefing.ts` |
+| Proactive scheduler | `src/scheduler.ts` |
+| Deep research / curriculum / gaps | `src/research/deep_research.ts`, `src/commands/gapsCommand.ts` |
+| Learned skills | `src/skills/skills.ts` |
+| Run traces + debug logging | `src/traces.ts`, `src/debug_log.ts` |
+| Slash commands (thin shortcuts) + command groups | `src/commands/slashCommands.ts`, `src/commands/categories.ts` |
 | Settings | `src/settings.ts` |
 | Vizier server setup modal + model download modal | `src/ui/ServerSetupModal.ts` |
-| AI prompts | `src/prompts.ts` |
-| Ollama API wrapper | `src/utils/ollama.ts` |
+| AI prompts (command-path) | `src/prompts.ts` |
+| Ollama API wrapper (command-path) | `src/utils/ollama.ts` |
 | Map-reduce summarizer | `src/utils/chunking.ts` |
+| Tests (vitest) | `test/` — run with `npm test` |
 
 **External services used:**
 - `r.jina.ai` — article fetching (converts any URL to clean markdown; free, no auth)
@@ -30,11 +44,10 @@ Persisted in `localStorage` under key `vizier-chat-history` (last 60 messages). 
 ## Environment & tooling
 
 - Node.js: use current LTS (Node 18+ recommended).
-- **Package manager: npm** (required for this sample - `package.json` defines npm scripts and dependencies).
-- **Bundler: esbuild** (required for this sample - `esbuild.config.mjs` and build scripts depend on it). Alternative bundlers like Rollup or webpack are acceptable for other projects if they bundle all external dependencies into `main.js`.
+- **Package manager: npm** — `package.json` defines the build/test scripts and dependencies.
+- **Bundler: esbuild** — `esbuild.config.mjs` bundles `src/` into `main.js`.
+- **Tests: vitest** — `npm test` (config in `vitest.config.ts`, suites in `test/`).
 - Types: `obsidian` type definitions.
-
-**Note**: This sample project has specific technical dependencies on npm and esbuild. If you're creating a plugin from scratch, you can choose different tools, but you'll need to replace the build configuration accordingly.
 
 ### Install
 

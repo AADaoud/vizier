@@ -32,3 +32,10 @@ memories.json
 contradiction_state.json
 intake_state.json
 scheduler_state.json
+
+# Syncthing/cloud conflict copies (this plugin commonly lives in a synced vault)
+*.sync-conflict-*
+
+# Python venv for the local Vizier server
+.venv/
+__pycache__/
