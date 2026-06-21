@@ -30,6 +30,18 @@ import { recordRun } from '../traces';
 // embedding host is effectively down, so further attempts only waste time.
 const ABORT_AFTER_CONSECUTIVE_FAILURES = 12;
 
+// During a full reindex, flush to disk every N files instead of after every
+// file. Writing the whole index per-file is O(n²) IO and blocks the UI; a
+// periodic flush (plus a final save) keeps progress durable without the storm.
+const SAVE_EVERY_FILES = 50;
+
+// Embedding vectors are stored at full f64 precision (~17 digits/number), which
+// dominates the file size. 6 decimals is far more than cosine similarity needs
+// and roughly halves the on-disk size and serialization cost.
+function roundVector(v: number[]): number[] {
+	return v.map(x => Math.round(x * 1e6) / 1e6);
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface IndexChunk {
@@ -143,6 +155,8 @@ function chunkByHeadings(text: string, maxChars = 600): string[] {
 export class VaultIndex {
 	private storePath: string;
 	private chunks: IndexChunk[] = [];
+	/** chunk_id → chunk, for O(1) lookups during (re)indexing. */
+	private byId = new Map<string, IndexChunk>();
 	private dirty = false;
 
 	constructor(pluginDir: string) {
@@ -159,6 +173,7 @@ export class VaultIndex {
 				this.chunks = JSON.parse(raw) as IndexChunk[];
 			}
 		} catch { this.chunks = []; }
+		this.byId = new Map(this.chunks.map(c => [c.chunk_id, c]));
 	}
 
 	private save(): void {
@@ -173,12 +188,19 @@ export class VaultIndex {
 	/** Remove all chunks for a given file path. */
 	removeFile(filePath: string): void {
 		const before = this.chunks.length;
-		this.chunks = this.chunks.filter(c => c.path !== filePath);
+		this.chunks = this.chunks.filter(c => {
+			if (c.path === filePath) { this.byId.delete(c.chunk_id); return false; }
+			return true;
+		});
 		if (this.chunks.length !== before) this.dirty = true;
 	}
 
-	/** Index or re-index a single file. Skips chunks whose text_hash hasn't changed. */
-	async indexFile(file: TFile, app: App, settings: AIAgentSettings): Promise<{ added: number; failed: number }> {
+	/**
+	 * Index or re-index a single file. Skips chunks whose text_hash hasn't changed.
+	 * Pass defer=true during a batch reindex to skip the per-file disk write (the
+	 * caller flushes periodically) — avoids rewriting the whole index per file.
+	 */
+	async indexFile(file: TFile, app: App, settings: AIAgentSettings, defer = false): Promise<{ added: number; failed: number }> {
 		const content = await app.vault.cachedRead(file);
 		// Strip YAML frontmatter from indexing (the metadata is in frontmatter cache)
 		const body = content.replace(/^---[\s\S]*?---\n/, '').trim();
@@ -195,7 +217,7 @@ export class VaultIndex {
 			const id   = `${file.path}#${i}`;
 
 			// Skip if unchanged
-			const existing = this.chunks.find(c => c.chunk_id === id);
+			const existing = this.byId.get(id);
 			if (existing?.text_hash === hash) continue;
 
 			try {
@@ -206,7 +228,7 @@ export class VaultIndex {
 					chunk_id: id,
 					text_hash: hash,
 					text,
-					vector,
+					vector: roundVector(vector),
 					indexed_at: Date.now(),
 				};
 
@@ -214,6 +236,7 @@ export class VaultIndex {
 					Object.assign(existing, chunk);
 				} else {
 					this.chunks.push(chunk);
+					this.byId.set(id, chunk);
 				}
 				this.dirty = true;
 				added++;
@@ -223,7 +246,7 @@ export class VaultIndex {
 			}
 		}
 
-		if (this.dirty) this.save();
+		if (!defer && this.dirty) this.save();
 		return { added, failed };
 	}
 
@@ -253,12 +276,16 @@ export class VaultIndex {
 			if (!file) continue;
 			try {
 				onProgress?.(i, files.length);
-				const r = await this.indexFile(file, app, settings);
+				// defer=true: don't rewrite the whole index after every file.
+				const r = await this.indexFile(file, app, settings, true);
 				chunksAdded   += r.added;
 				embedFailures += r.failed;
 				if (r.added > 0)      consecutiveFailures = 0;
 				else if (r.failed > 0) consecutiveFailures += r.failed;
 			} catch { embedFailures++; consecutiveFailures++; }
+
+			// Periodic flush so progress survives a crash without per-file IO.
+			if (this.dirty && (i + 1) % SAVE_EVERY_FILES === 0) this.save();
 
 			// Circuit-breaker: if embeddings keep failing, stop rather than
 			// grinding through (and log-spamming) every remaining file.
