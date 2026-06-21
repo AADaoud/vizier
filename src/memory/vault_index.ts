@@ -158,21 +158,23 @@ export class VaultIndex {
 	/** chunk_id → chunk, for O(1) lookups during (re)indexing. */
 	private byId = new Map<string, IndexChunk>();
 	private dirty = false;
+	/** Resolves once the on-disk index has finished loading. */
+	private readonly ready: Promise<void>;
 
 	constructor(pluginDir: string) {
 		this.storePath = path.join(pluginDir, 'vault_index.json');
-		this.load();
+		// Load asynchronously so a large index file doesn't block plugin onload
+		// (and thus Obsidian launch). Public methods await `ready` before use.
+		this.ready = this.load();
 	}
 
 	// ── Persistence ──────────────────────────────────────────────────
 
-	private load(): void {
+	private async load(): Promise<void> {
 		try {
-			if (fs.existsSync(this.storePath)) {
-				const raw = fs.readFileSync(this.storePath, 'utf-8');
-				this.chunks = JSON.parse(raw) as IndexChunk[];
-			}
-		} catch { this.chunks = []; }
+			const raw = await fs.promises.readFile(this.storePath, 'utf-8');
+			this.chunks = JSON.parse(raw) as IndexChunk[];
+		} catch { this.chunks = []; } // missing file or parse error → start empty
 		this.byId = new Map(this.chunks.map(c => [c.chunk_id, c]));
 	}
 
@@ -202,7 +204,8 @@ export class VaultIndex {
 	// ── Index management ─────────────────────────────────────────────
 
 	/** Remove all chunks for a given file path. */
-	removeFile(filePath: string): void {
+	async removeFile(filePath: string): Promise<void> {
+		await this.ready;
 		const before = this.chunks.length;
 		this.chunks = this.chunks.filter(c => {
 			if (c.path === filePath) { this.byId.delete(c.chunk_id); return false; }
@@ -217,6 +220,7 @@ export class VaultIndex {
 	 * caller flushes periodically) — avoids rewriting the whole index per file.
 	 */
 	async indexFile(file: TFile, app: App, settings: AIAgentSettings, defer = false): Promise<{ added: number; failed: number }> {
+		await this.ready;
 		const content = await app.vault.cachedRead(file);
 		// Strip YAML frontmatter from indexing (the metadata is in frontmatter cache)
 		const body = content.replace(/^---[\s\S]*?---\n/, '').trim();
@@ -269,6 +273,7 @@ export class VaultIndex {
 	/** Full incremental re-index of the vault. Processes only changed/new files.
 	 *  Throws with a clear message when the embedding model is unavailable. */
 	async reindexVault(app: App, settings: AIAgentSettings, onProgress?: (done: number, total: number) => void): Promise<ReindexStats> {
+		await this.ready;
 		const start = Date.now();
 		const cfg   = buildLLMConfig(settings);
 
@@ -334,6 +339,7 @@ export class VaultIndex {
 		k = 5,
 		threshold = 0.35
 	): Promise<SearchResult[]> {
+		await this.ready;
 		if (this.chunks.length === 0) return [];
 
 		const cfg    = buildLLMConfig(settings);

@@ -119,7 +119,7 @@ export default class VizierPlugin extends Plugin {
 				this.app.vault.on('delete', (file) => {
 					if (file instanceof TFile) {
 						invalidateVaultCache();
-						this.vaultIndex?.removeFile(file.path);
+						void this.vaultIndex?.removeFile(file.path);
 					}
 				})
 			);
@@ -127,7 +127,7 @@ export default class VizierPlugin extends Plugin {
 				this.app.vault.on('rename', (file, oldPath) => {
 					if (file instanceof TFile && file.extension === 'md') {
 						invalidateVaultCache();
-						this.vaultIndex?.removeFile(oldPath);
+						void this.vaultIndex?.removeFile(oldPath);
 						void this.vaultIndex?.indexFile(file, this.app, this.settings);
 					}
 				})
