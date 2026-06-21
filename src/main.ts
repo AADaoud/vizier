@@ -70,24 +70,32 @@ export default class VizierPlugin extends Plugin {
 			setAgentVaultIndex(this.vaultIndex);
 			setAgentMemoryManager(this.memoryManager);
 
-			// Incremental vault re-index in the background after load
+			// Incremental vault re-index in the background — deferred well after
+			// launch so it doesn't compete with Obsidian startup, Ollama warm-up,
+			// and capability probing (that contention both slowed launch and made
+			// the first embeddings fail). Steady-state runs are cheap: unchanged
+			// chunks are skipped via text_hash, so no embeddings are issued.
+			const REINDEX_STARTUP_DELAY = 20_000;
 			this.app.workspace.onLayoutReady(() => {
-				beginActivity('reindex', 'Updating vault index');
-				void this.vaultIndex?.reindexVault(this.app, this.settings, (done, total) => {
-					if (done % 20 === 0) updateActivity('reindex', `${done}/${total} notes`);
-				})
-					.then(r => {
-						if (r.aborted) endActivity('reindex', false, `Vault index stopped — embeddings failing (${r.embedFailures} chunks)`);
-						else if (r.chunksAdded > 0) {
-							const failNote = r.embedFailures > 0 ? ` (${r.embedFailures} chunks failed)` : '';
-							endActivity('reindex', true, `Vault index updated (${r.chunksAdded} new chunks)${failNote}`);
-						}
-						else endActivity('reindex', true, undefined, true); // nothing changed — vanish quietly
+				const startReindex = () => {
+					beginActivity('reindex', 'Updating vault index');
+					void this.vaultIndex?.reindexVault(this.app, this.settings, (done, total) => {
+						if (done % 20 === 0) updateActivity('reindex', `${done}/${total} notes`);
 					})
-					.catch((err: unknown) => {
-						endActivity('reindex', false, 'Vault index failed — check embedding model');
-						console.warn('[Vizier] background vault reindex failed:', err);
-					});
+						.then(r => {
+							if (r.aborted) endActivity('reindex', false, `Vault index stopped — embeddings failing (${r.embedFailures} chunks)`);
+							else if (r.chunksAdded > 0) {
+								const failNote = r.embedFailures > 0 ? ` (${r.embedFailures} chunks failed)` : '';
+								endActivity('reindex', true, `Vault index updated (${r.chunksAdded} new chunks)${failNote}`);
+							}
+							else endActivity('reindex', true, undefined, true); // nothing changed — vanish quietly
+						})
+						.catch((err: unknown) => {
+							endActivity('reindex', false, 'Vault index failed — check embedding model');
+							console.warn('[Vizier] background vault reindex failed:', err);
+						});
+				};
+				this.registerInterval(window.setTimeout(startReindex, REINDEX_STARTUP_DELAY) as unknown as number);
 			});
 
 			// Keep vault index up to date on file changes

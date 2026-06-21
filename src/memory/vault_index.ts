@@ -176,11 +176,27 @@ export class VaultIndex {
 		this.byId = new Map(this.chunks.map(c => [c.chunk_id, c]));
 	}
 
-	private save(): void {
+	private saving = false;
+	private savePending = false;
+
+	/**
+	 * Persist the index without blocking the main thread (async write). Calls are
+	 * coalesced: if a save is already running, the latest state is flushed once it
+	 * finishes, so overlapping callers never corrupt the file with interleaved writes.
+	 */
+	private async save(): Promise<void> {
+		if (this.saving) { this.savePending = true; return; }
+		this.saving = true;
 		try {
-			fs.writeFileSync(this.storePath, JSON.stringify(this.chunks), 'utf-8');
-			this.dirty = false;
-		} catch { /* best-effort */ }
+			do {
+				this.savePending = false;
+				const data = JSON.stringify(this.chunks); // synchronous snapshot
+				this.dirty = false;
+				await fs.promises.writeFile(this.storePath, data, 'utf-8');
+			} while (this.savePending);
+		} catch { /* best-effort */ } finally {
+			this.saving = false;
+		}
 	}
 
 	// ── Index management ─────────────────────────────────────────────
@@ -246,7 +262,7 @@ export class VaultIndex {
 			}
 		}
 
-		if (!defer && this.dirty) this.save();
+		if (!defer && this.dirty) await this.save();
 		return { added, failed };
 	}
 
@@ -285,7 +301,11 @@ export class VaultIndex {
 			} catch { embedFailures++; consecutiveFailures++; }
 
 			// Periodic flush so progress survives a crash without per-file IO.
-			if (this.dirty && (i + 1) % SAVE_EVERY_FILES === 0) this.save();
+			if (this.dirty && (i + 1) % SAVE_EVERY_FILES === 0) {
+				await this.save();
+				// Yield to the event loop so the UI stays responsive during a big build.
+				await new Promise(resolve => setTimeout(resolve, 0));
+			}
 
 			// Circuit-breaker: if embeddings keep failing, stop rather than
 			// grinding through (and log-spamming) every remaining file.
@@ -295,7 +315,7 @@ export class VaultIndex {
 			}
 		}
 
-		if (this.dirty) this.save();
+		if (this.dirty) await this.save();
 		// A completed run is a success even if some chunks failed — only an
 		// early abort (embeddings effectively down) counts as a failed run.
 		recordRun({ kind: 'vault_index', duration_ms: Date.now() - start, ok: !aborted, notes_touched: files.length, chunks_added: chunksAdded, embed_failures: embedFailures, aborted });
