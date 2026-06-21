@@ -7,8 +7,8 @@ import { requestUrl } from 'obsidian';
 
 const mockRequest = requestUrl as unknown as ReturnType<typeof import('vitest').vi.fn>;
 
-function showResp(modelInfo: Record<string, unknown>) {
-	return { status: 200, json: { model_info: modelInfo }, text: '', arrayBuffer: new ArrayBuffer(0), headers: {} };
+function showResp(modelInfo: Record<string, unknown>, parameters?: string) {
+	return { status: 200, json: { model_info: modelInfo, parameters }, text: '', arrayBuffer: new ArrayBuffer(0), headers: {} };
 }
 
 beforeEach(() => mockRequest.mockReset());
@@ -48,19 +48,25 @@ describe('contextCharBudget()', () => {
 });
 
 describe('getContextWindow()', () => {
-	it('returns an exact known window without hitting the network', async () => {
-		expect(await getContextWindow('http://x', 'gemma3:4b')).toBe(8192);
-		expect(mockRequest).not.toHaveBeenCalled();
-	});
-
-	it('uses Ollama /api/show BEFORE the prefix heuristic (the 31b-cloud fix)', async () => {
-		// Prefix match alone would wrongly resolve gemma4:* → gemma4:e2b (32768).
+	it('trusts /api/show context_length over the static table (the 31b-cloud fix)', async () => {
+		// The table/prefix heuristic would wrongly give gemma4:* → 32768.
 		mockRequest.mockResolvedValueOnce(showResp({ 'gemma4.context_length': 262144 }));
 		expect(await getContextWindow('http://x', 'gemma4:31b-cloud')).toBe(262144);
 	});
 
-	it('falls back to the prefix heuristic when /api/show has no context length', async () => {
-		mockRequest.mockResolvedValueOnce(showResp({}));
+	it('trusts /api/show even for a model whose table entry is stale', async () => {
+		// KNOWN_WINDOWS lists gemma3:4b as 8192, but Ollama reports 131072.
+		mockRequest.mockResolvedValueOnce(showResp({ 'gemma3.context_length': 131072 }));
+		expect(await getContextWindow('http://x', 'gemma3:4b')).toBe(131072);
+	});
+
+	it('prefers an explicit num_ctx override over context_length', async () => {
+		mockRequest.mockResolvedValueOnce(showResp({ 'gemma3.context_length': 131072 }, 'temperature 0.7\nnum_ctx 8192'));
+		expect(await getContextWindow('http://x', 'gemma3:4b-capped')).toBe(8192);
+	});
+
+	it('falls back to the static table when Ollama is unreachable', async () => {
+		mockRequest.mockResolvedValueOnce({ status: 0, json: {}, text: '', arrayBuffer: new ArrayBuffer(0), headers: {} });
 		// base "gemma3" → first gemma3:* entry (gemma3:1b = 32768)
 		expect(await getContextWindow('http://x', 'gemma3:99b-unknown')).toBe(32768);
 	});

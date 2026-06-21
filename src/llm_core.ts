@@ -82,13 +82,20 @@ export async function getContextWindow(ollamaUrl: string, model: string): Promis
 	return resolved;
 }
 
-async function resolveContextWindow(ollamaUrl: string, model: string): Promise<number> {
-	// 1. Exact known value
-	if (KNOWN_WINDOWS[model]) return KNOWN_WINDOWS[model];
+function parseNumCtx(parameters: string | undefined): number | null {
+	// `parameters` is a newline-delimited "key   value" blob; num_ctx, when set
+	// via the Modelfile, is the actual runtime window (overrides context_length).
+	const m = parameters?.match(/num_ctx\s+(\d+)/);
+	return m?.[1] ? parseInt(m[1], 10) : null;
+}
 
-	// 2. Authoritative: ask Ollama directly. This must run BEFORE the prefix
-	//    heuristic — otherwise e.g. "gemma4:31b-cloud" prefix-matches the first
-	//    "gemma4:*" entry (e2b → 32768) and we badly underreport a 256k window.
+async function resolveContextWindow(ollamaUrl: string, model: string): Promise<number> {
+	// 1. Authoritative: ask Ollama. This runs FIRST — the static KNOWN_WINDOWS
+	//    table is hand-maintained and unreliable (e.g. it listed gemma3:4b as 8192
+	//    when /api/show reports 131072), and the prefix heuristic would otherwise
+	//    match the smallest "gemma4:*" variant (e2b → 32768) for a 256k model.
+	//    Prefer an explicit num_ctx override (the real runtime window) over the
+	//    architecture's max context_length.
 	try {
 		const resp = await requestUrl({
 			url: `${ollamaUrl}/api/show`,
@@ -98,7 +105,9 @@ async function resolveContextWindow(ollamaUrl: string, model: string): Promise<n
 			throw: false,
 		});
 		if (resp.status === 200) {
-			const data = resp.json as { model_info?: Record<string, unknown> };
+			const data = resp.json as { parameters?: string; model_info?: Record<string, unknown> };
+			const numCtx = parseNumCtx(data.parameters);
+			if (numCtx && numCtx > 0) return numCtx;
 			for (const key of Object.keys(data.model_info ?? {})) {
 				if (key.includes('context_length') || key.includes('n_ctx')) {
 					const v = (data.model_info ?? {})[key];
@@ -106,9 +115,10 @@ async function resolveContextWindow(ollamaUrl: string, model: string): Promise<n
 				}
 			}
 		}
-	} catch { /* fall through to heuristic */ }
+	} catch { /* Ollama unreachable — fall back to the static table below */ }
 
-	// 3. Heuristic prefix match — last resort when Ollama can't tell us.
+	// 2. Static fallback only when Ollama can't answer: exact, then prefix.
+	if (KNOWN_WINDOWS[model]) return KNOWN_WINDOWS[model];
 	const base = model.split(':')[0] ?? model;
 	const entry = Object.entries(KNOWN_WINDOWS).find(([k]) => k.startsWith(base + ':') || k === base);
 	if (entry) return entry[1];
