@@ -277,6 +277,36 @@ function models(cfg: LLMCoreConfig, role: ModelRole): string[] {
  * Always temperature 0 — the model's creativity is irrelevant when outputting
  * a claim confidence score or a dedup decision.
  */
+/**
+ * Tolerant JSON parse for model output. Thinking models (e.g. gemma4:31b) and
+ * many cloud models wrap structured output in ```json fences or emit a
+ * <think>…</think> block first, so a bare JSON.parse fails. We strip those, then
+ * parse; failing that, we grab the first balanced {...} / [...] span.
+ */
+export function coerceJSON<T>(raw: string): T {
+	let s = raw.trim();
+	s = s.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();   // drop reasoning block
+	const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);    // unwrap code fence
+	if (fence?.[1]) s = fence[1].trim();
+
+	try {
+		return JSON.parse(s) as T;
+	} catch { /* fall through to span extraction */ }
+
+	const start = ((): number => {
+		const o = s.indexOf('{'), a = s.indexOf('[');
+		if (o === -1) return a;
+		if (a === -1) return o;
+		return Math.min(o, a);
+	})();
+	if (start !== -1) {
+		const close = s[start] === '{' ? '}' : ']';
+		const end = s.lastIndexOf(close);
+		if (end > start) return JSON.parse(s.slice(start, end + 1)) as T;
+	}
+	throw new Error('No JSON found in model output');
+}
+
 export async function callStructured<T>(
 	cfg: LLMCoreConfig,
 	role: ModelRole,
@@ -297,6 +327,9 @@ export async function callStructured<T>(
 		// Optimistically use format: true until proven otherwise
 		const useFormat = caps ? caps.structuredOutputs : true;
 
+		// think:false — structured output is consumed by code, not read; the
+		// thinking phase only adds latency and (for gemma4-class models) makes the
+		// forced JSON diverge from the reasoning. See Ollama issue #15386.
 		let body: Record<string, unknown>;
 		if (useFormat) {
 			body = {
@@ -304,10 +337,12 @@ export async function callStructured<T>(
 				messages,
 				format: schema,
 				stream: false,
+				think: false,
 				options: { temperature: 0, ...opts },
 			};
 		} else {
-			// Fallback: append schema instruction to last user message
+			// Fallback: put the schema in the prompt (no format field — thinking
+			// models ignore/garble it) and tolerate fenced JSON when parsing.
 			const msgs = [...messages];
 			const last = msgs[msgs.length - 1];
 			if (last?.role === 'user') {
@@ -316,7 +351,7 @@ export async function callStructured<T>(
 					content: last.content + '\n\nRespond ONLY with valid JSON matching this schema: ' + JSON.stringify(schema),
 				};
 			}
-			body = { model, messages: msgs, stream: false, options: { temperature: 0, ...opts } };
+			body = { model, messages: msgs, stream: false, think: false, options: { temperature: 0, ...opts } };
 		}
 
 		try {
@@ -336,13 +371,13 @@ export async function callStructured<T>(
 			markOk(key);
 
 			try {
-				return JSON.parse(raw) as T;
+				return coerceJSON<T>(raw);
 			} catch {
-				// JSON parse failed — if we used format mode this model probably doesn't support it
+				// Parse failed even after fence/think tolerance — if we used format
+				// mode this model probably doesn't support it; flip to the prompt
+				// path so the next call (and retries) use schema-in-prompt instead.
 				if (useFormat) {
 					_caps.set(model, { structuredOutputs: false, checkedAt: Date.now() });
-					// Retry this same model without format on the next fallback pass
-					// (simplest: just throw, outer loop will pick next model or throw)
 				}
 				throw new Error(`Model returned invalid JSON: ${raw.slice(0, 300)}`);
 			}
