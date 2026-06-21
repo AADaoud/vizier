@@ -61,29 +61,6 @@ export function buildDateBlock(): LLMMessage {
 	};
 }
 
-// ── Active note block ─────────────────────────────────────────────────────
-
-export async function buildActiveNoteBlock(app: App): Promise<LLMMessage | null> {
-	const file = app.workspace.getActiveFile();
-	if (!file) return null;
-	const content = await app.vault.cachedRead(file);
-	return {
-		role: 'system',
-		content: [
-			`ACTIVE NOTE (PROTECTED CONTEXT): [[${file.basename}]]`,
-			'This is BACKGROUND CONTEXT only — the note the user happens to have open.',
-			'Do NOT summarise, analyse, or act on it unless the user explicitly asks about it.',
-			'The content below IS the note. Do NOT call read_note for it — it is already loaded.',
-			'To edit it: use edit_note with FIND/REPLACE blocks. Only use write_note if creating a different note.',
-			'',
-			'```markdown',
-			content.slice(0, 8000), // cap at 8K chars to save context
-			content.length > 8000 ? '\n[… truncated — use read_note for full content …]' : '',
-			'```',
-		].join('\n'),
-	};
-}
-
 // ── Vault state block ─────────────────────────────────────────────────────
 
 interface VaultSnapshot {
@@ -142,7 +119,9 @@ let _vaultStateCache: { key: string; msg: LLMMessage } | null = null;
 
 export function buildVaultStateBlock(app: App, settings: AIAgentSettings): LLMMessage {
 	const snap = buildVaultSnapshot(app, settings);
-	const cacheKey = JSON.stringify({ total: snap.totalNotes, folders: snap.byFolder, top: snap.topFolders });
+	const activeNote = app.workspace.getActiveFile();
+	const activeName = activeNote && activeNote.extension === 'md' ? activeNote.basename : '';
+	const cacheKey = JSON.stringify({ total: snap.totalNotes, folders: snap.byFolder, top: snap.topFolders, active: activeName });
 
 	if (_vaultStateCache?.key === cacheKey) return _vaultStateCache.msg;
 
@@ -169,6 +148,10 @@ export function buildVaultStateBlock(app: App, settings: AIAgentSettings): LLMMe
 			'',
 			'Human Network folders:',
 			folderLines || '  (none)',
+			'',
+			activeName
+				? `Active note (the note the user has open): [[${activeName}]] — its content is NOT loaded; call read_active_note only if the user refers to "this note".`
+				: 'Active note: (none open)',
 			'',
 			`Recently modified: ${snap.recentNotes.map(n => `[[${n}]]`).join(', ')}`,
 		].join('\n'),
@@ -261,7 +244,6 @@ export interface PromptConfig {
 	settings: AIAgentSettings;
 	selectedTools: ToolDefinition[];
 	memories?: Array<{ text: string; category: string }>;
-	includeActiveNote?: boolean;
 	skillsMarkdown?: string;
 }
 
@@ -275,9 +257,11 @@ export async function buildSystemPrompt(cfg: PromptConfig): Promise<LLMMessage[]
 		buildSkillsBlock(cfg.skillsMarkdown),
 	];
 
-	if (cfg.includeActiveNote !== false) {
-		blocks.splice(1, 0, await buildActiveNoteBlock(cfg.app));
-	}
+	// NOTE: the active note's CONTENT is deliberately NOT injected here. Having
+	// it in context made models analyse/search against whatever note happened to
+	// be open. Instead the agent calls read_active_note when the user actually
+	// refers to "this note". VAULT STATE carries only the active note's name so
+	// the model knows the tool is worth calling.
 
 	return blocks.filter((b): b is LLMMessage => b !== null);
 }

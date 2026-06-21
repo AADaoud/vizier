@@ -224,7 +224,6 @@ export async function runAgentLoop(
 		settings,
 		selectedTools,
 		memories,
-		includeActiveNote: true,
 		skillsMarkdown,
 	});
 

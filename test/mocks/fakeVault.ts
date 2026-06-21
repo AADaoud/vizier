@@ -12,6 +12,8 @@ export interface FakeNote {
 	mtime?: number;
 	/** Resolved outgoing links (target path -> count), as Obsidian exposes them. */
 	links?: string[];
+	/** Body content returned by vault.cachedRead. */
+	content?: string;
 }
 
 export interface FakeApp {
@@ -19,10 +21,14 @@ export interface FakeApp {
 		getMarkdownFiles: () => TFile[];
 		getAbstractFileByPath: (p: string) => TFile | null;
 		createFolder: (p: string) => Promise<void>;
+		cachedRead: (f: TFile) => Promise<string>;
 	};
 	metadataCache: {
 		getFileCache: (f: TFile) => { frontmatter?: Record<string, unknown> } | null;
 		resolvedLinks: Record<string, Record<string, number>>;
+	};
+	workspace: {
+		getActiveFile: () => TFile | null;
 	};
 	__createdFolders: string[];
 }
@@ -32,16 +38,20 @@ function makeFile(note: FakeNote): TFile {
 	f.path = note.path;
 	const name = note.path.split('/').pop() ?? note.path;
 	f.name = name;
-	f.basename = name.replace(/\.md$/, '');
-	f.extension = 'md';
+	const dot = name.lastIndexOf('.');
+	f.basename = dot > 0 ? name.slice(0, dot) : name;
+	f.extension = dot > 0 ? name.slice(dot + 1) : 'md';
 	f.stat = { ctime: 0, mtime: note.mtime ?? 0, size: 0 };
 	return f;
 }
 
-export function createFakeApp(notes: FakeNote[]): FakeApp {
+export function createFakeApp(notes: FakeNote[], activePath?: string): FakeApp {
 	const files = notes.map(makeFile);
 	const fmByPath = new Map<string, Record<string, unknown> | undefined>();
 	notes.forEach(n => fmByPath.set(n.path, n.frontmatter));
+	const contentByPath = new Map<string, string>();
+	notes.forEach(n => contentByPath.set(n.path, n.content ?? ''));
+	const activeFile = activePath ? (files.find(f => f.path === activePath) ?? null) : null;
 
 	const resolvedLinks: Record<string, Record<string, number>> = {};
 	for (const n of notes) {
@@ -63,6 +73,7 @@ export function createFakeApp(notes: FakeNote[]): FakeApp {
 				createdFolders.push(p);
 				existingPaths.add(p);
 			},
+			cachedRead: async (f: TFile) => contentByPath.get(f.path) ?? '',
 		},
 		metadataCache: {
 			getFileCache: (f: TFile) => {
@@ -70,6 +81,9 @@ export function createFakeApp(notes: FakeNote[]): FakeApp {
 				return fm ? { frontmatter: fm } : null;
 			},
 			resolvedLinks,
+		},
+		workspace: {
+			getActiveFile: () => activeFile,
 		},
 	};
 }

@@ -64,10 +64,23 @@ Pitfall: don't use this to read a note you already have in context.`,
 		required: ['name'],
 		keywords: ['read', 'open', 'show me', 'content of', 'what does'],
 		alwaysAvailable: true,
-		doc: `read_note — Read a vault note.
-Do NOT call this for the active note — its content is already in PROTECTED CONTEXT.
+		doc: `read_note — Read a vault note by name.
+For the note the user currently has open, use read_active_note instead.
 Pass the full path as name, or set folder, when a basename is ambiguous (the tool will list candidates).
 Use vault_search first to confirm the note exists.`,
+	},
+
+	{
+		name: 'read_active_note',
+		description: 'Read the note the user currently has open (the active note).',
+		params: {},
+		required: [],
+		keywords: ['this note', 'active note', 'current note', 'open note', 'this page', 'this document', 'the note', 'note i', 'note im', "note i'm", 'on screen', 'in front of me'],
+		alwaysAvailable: true,
+		doc: `read_active_note — Load the note the user currently has open.
+Call this ONLY when the user refers to what they are looking at — "this note", "the current/active note", "summarise this", "edit this page", etc.
+Do NOT call it for general questions, or when the user names a specific note (use read_note for that).
+Returns the active note's name and content; if nothing is open it says so.`,
 	},
 
 	{
@@ -104,7 +117,7 @@ Returns the created [[wikilink]] to emit in your response.`,
 Prefer this over write_note when changing <50% of the content.
 Pass the full path as name, or set folder, when a basename is ambiguous (the tool will list candidates).
 The find string must be unique in the note — if ambiguous, use more surrounding context.
-For the active note, the content is already in context so you know what to find.`,
+For the note the user has open, call read_active_note first to see its current content.`,
 	},
 
 	// ── Entity / Human Network ────────────────────────────────────────────

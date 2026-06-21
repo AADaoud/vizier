@@ -221,6 +221,22 @@ export function resolveNoteTarget(app: App, name: string, folder = ''): { file?:
 	return { file: matches[0] };
 }
 
+async function handleReadActiveNote(app: App, maxChars = DEFAULT_READ_NOTE_CHARS): Promise<string> {
+	const file = app.workspace.getActiveFile();
+	if (!file) return 'No note is currently open. Ask the user which note they mean, or use vault_search.';
+	if (file.extension !== 'md') return `The active file "${file.name}" is not a markdown note.`;
+
+	try {
+		const content = await app.vault.cachedRead(file);
+		const body = content.length > maxChars
+			? content.slice(0, maxChars) + `\n\n[… truncated at ${maxChars} chars — use edit_note to modify specific sections]`
+			: content;
+		return `Active note: [[${file.basename}]] (\`${file.path}\`)\n\n${body}`;
+	} catch (err) {
+		return `Failed to read the active note: ${err instanceof Error ? err.message : String(err)}`;
+	}
+}
+
 async function handleReadNote(params: Record<string, unknown>, app: App, maxChars = DEFAULT_READ_NOTE_CHARS): Promise<string> {
 	const name = str(params, 'name');
 	if (!name) return 'ERROR: read_note requires a name parameter.';
@@ -822,6 +838,9 @@ export async function executeTool(
 			case 'read_note':
 				output = await handleReadNote(call.params, app, opts.readNoteChars);
 				break;
+			case 'read_active_note':
+				output = await handleReadActiveNote(app, opts.readNoteChars);
+				break;
 			case 'write_note':
 				output = await handleWriteNote(call.params, app, settings);
 				break;
@@ -903,7 +922,7 @@ export async function executeTool(
 }
 
 function getAllToolNames(): string[] {
-	return ['vault_search', 'read_note', 'write_note', 'edit_note', 'create_entity',
+	return ['vault_search', 'read_note', 'read_active_note', 'write_note', 'edit_note', 'create_entity',
 		'link_entities', 'wiki_lookup', 'fetch_url', 'summarize_media', 'bridge',
 		'timeline', 'contradict_note', 'audit_sources', 'recluster', 'thesis',
 		'socratic', 'reflection', 'standardize_folder', 'ingest_document', 'transcribe',
