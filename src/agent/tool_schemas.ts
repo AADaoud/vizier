@@ -186,14 +186,16 @@ Pitfall: some URLs are blocked or paywalled; fall back gracefully if the fetch f
 
 	{
 		name: 'summarize_media',
-		description: 'Summarize a YouTube video or podcast via transcript.',
+		description: 'Summarize a YouTube video or podcast via transcript into a Clips note.',
 		params: {
 			url:      { type: 'string', description: 'YouTube or podcast URL.' },
-			detailed: { type: 'string', enum: ['brief', 'detailed'], description: 'Summary depth (default: brief).' },
+			detailed: { type: 'string', enum: ['brief', 'detailed'], description: 'brief = a concise summary (default). detailed = long-form, section-by-section notes — use when the user wants thorough notes, a lecture/long video, or says "in depth"/"detailed"/"long".' },
 		},
 		required: ['url'],
 		keywords: ['youtube', 'video', 'podcast', 'transcript', 'watch', 'episode'],
-		doc: `summarize_media — Summarize YouTube videos via transcript.
+		doc: `summarize_media — Summarize YouTube videos via transcript into a Clips note.
+Pass detailed:"detailed" for long videos/lectures or when the user wants thorough notes; otherwise brief.
+The note is titled with the real video title (fetched via oEmbed).
 Requires the Vizier server to be running for transcript extraction.
 If the server is unavailable, tell the user and suggest starting it.`,
 	},

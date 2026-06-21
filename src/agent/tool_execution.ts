@@ -424,7 +424,12 @@ async function handleSummarizeMedia(
 	const model = settings.roles.default.models[0] ?? settings.defaultModel;
 	const capture = captureMessages();
 
-	await executeClip(url, app, capture.addMessage, capture.replaceMessage, model, cfg, settings.clipsFolder, settings);
+	// Honor the brief/detailed choice: executeClip treats a leading "long " as
+	// detailed (long-form lecture notes) vs the default concise summary.
+	const detailed = str(params, 'detailed') === 'detailed';
+	const clipArg = detailed ? `long ${url}` : url;
+
+	await executeClip(clipArg, app, capture.addMessage, capture.replaceMessage, model, cfg, settings.clipsFolder, settings);
 	return capture.last() || `Summarized media from ${url}.`;
 }
 

@@ -1,5 +1,6 @@
 import { App, TFile, requestUrl } from 'obsidian';
 import { callOllama, callOllamaStructured } from '../utils/ollama';
+import { callStructured, buildLLMConfig } from '../llm_core';
 import { mapReduceSummarize } from '../utils/chunking';
 import { Prompts } from '../prompts';
 import { ClipLearnModal } from '../ui/ClipLearnModal';
@@ -643,6 +644,53 @@ const CLIP_SCHEMA = {
 	required: ['title', 'tags'],
 };
 
+/** Fetch a YouTube video's real title via the public oEmbed endpoint (no API key). */
+export async function fetchYouTubeTitle(url: string): Promise<string | null> {
+	try {
+		const resp = await requestUrl({
+			url: `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`,
+			throw: false,
+		});
+		if (resp.status === 200) {
+			const data = resp.json as { title?: string };
+			return data.title?.trim() || null;
+		}
+	} catch { /* oEmbed unavailable — fall back to model/heuristic title */ }
+	return null;
+}
+
+/**
+ * Derive a note title + tags for a clipped URL.
+ *  - YouTube: use the real video title (oEmbed) when available.
+ *  - Otherwise: extract from the summary via the (hardened) utility model.
+ *  - Last resort: the URL hostname.
+ * Routes through llm_core.callStructured when settings are available so thinking/
+ * cloud models (fenced/non-`format` JSON) don't fall through to the hostname.
+ */
+async function deriveClipMetadata(
+	url: string,
+	summary: string,
+	model: string,
+	config: CommandConfig,
+	settings?: AIAgentSettings,
+): Promise<ClipMetadata> {
+	const isYouTube = /youtube\.com|youtu\.be/.test(url);
+	let meta: ClipMetadata;
+	try {
+		meta = settings
+			? await callStructured<ClipMetadata>(buildLLMConfig(settings), 'utility', CLIP_SCHEMA, [{ role: 'user', content: Prompts.clipMetadata(summary) }])
+			: await callOllamaStructured<ClipMetadata>({ ollamaUrl: config.ollamaUrl, model, messages: [{ role: 'user', content: Prompts.clipMetadata(summary) }], format: CLIP_SCHEMA });
+	} catch {
+		meta = { title: new URL(url).hostname, tags: ['clip'] };
+	}
+	if (isYouTube) {
+		const ytTitle = await fetchYouTubeTitle(url);
+		if (ytTitle) meta.title = ytTitle;
+	}
+	if (!meta.title?.trim()) meta.title = new URL(url).hostname;
+	return meta;
+}
+
 export async function executeClip(
 	args: string,
 	app: App,
@@ -689,17 +737,7 @@ export async function executeClip(
 	}
 
 	replaceMessage('assistant', 'Extracting metadata…');
-	let meta: ClipMetadata;
-	try {
-		meta = await callOllamaStructured<ClipMetadata>({
-			ollamaUrl: config.ollamaUrl,
-			model,
-			messages: [{ role: 'user', content: Prompts.clipMetadata(summary) }],
-			format: CLIP_SCHEMA,
-		});
-	} catch {
-		meta = { title: new URL(url).hostname, tags: ['clip'] };
-	}
+	const meta = await deriveClipMetadata(url, summary, model, config, settings);
 
 	const date = today();
 	const safeTitle = sanitizeFilename(meta.title);
@@ -781,17 +819,7 @@ export async function executeClipLearn(
 	}
 
 	replaceMessage('assistant', 'Extracting metadata…');
-	let meta: ClipMetadata;
-	try {
-		meta = await callOllamaStructured<ClipMetadata>({
-			ollamaUrl: config.ollamaUrl,
-			model,
-			messages: [{ role: 'user', content: Prompts.clipMetadata(summary) }],
-			format: CLIP_SCHEMA,
-		});
-	} catch {
-		meta = { title: new URL(url).hostname, tags: ['clip'] };
-	}
+	const meta = await deriveClipMetadata(url, summary, model, config, settings);
 
 	const date = today();
 	const safeTitle = sanitizeFilename(meta.title);
