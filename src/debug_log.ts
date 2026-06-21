@@ -108,7 +108,7 @@ function cap(s: string): string {
 function fmt(data: unknown): string {
 	if (data === undefined || data === null) return '';
 	if (typeof data === 'string') return cap(data);
-	try { return cap(JSON.stringify(data, null, 2)); } catch { return cap(String(data)); }
+	try { return cap(JSON.stringify(data, null, 2)); } catch { return '[unserializable value]'; }
 }
 
 function indent(s: string): string {

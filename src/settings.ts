@@ -489,11 +489,10 @@ export class AIAgentSettingTab extends PluginSettingTab {
 
 		// ── Command groups ─────────────────────────────────────────────
 		new Setting(containerEl).setName('Command groups').setHeading();
-		const groupsDesc = containerEl.createEl('p', {
+		containerEl.createEl('p', {
 			text: 'Switch whole groups of slash commands off to declutter the chat picker. The core group (write, edit, find, read) is always available. Disabled commands fall through to the agent as normal text.',
 			cls: 'setting-item-description',
 		});
-		groupsDesc.style.marginTop = '0';
 
 		if (!this.plugin.settings.commandModules) {
 			this.plugin.settings.commandModules = { ...DEFAULT_COMMAND_MODULES };

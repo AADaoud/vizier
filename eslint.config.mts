@@ -31,5 +31,9 @@ export default tseslint.config(
 		"version-bump.mjs",
 		"versions.json",
 		"main.js",
+		// Dev-only test harness — not part of the shipped plugin and not in the
+		// build tsconfig, so the type-aware linter can't resolve it.
+		"test",
+		"vitest.config.ts",
 	]),
 );
