@@ -7,6 +7,7 @@ import { ClipLearnModal } from '../ui/ClipLearnModal';
 import { sanitizeFilename, sanitizeTag, buildYamlTags, today } from '../utils/noteBuilder';
 import { AIAgentSettings } from '../settings';
 import type { CommandCategory } from './categories';
+import { ensureVizierServer } from '../server_lifecycle';
 
 export interface SlashCommand {
 	id: string;
@@ -290,6 +291,12 @@ function extractYouTubeId(url: string): string | null {
 async function fetchAndSummarizeYouTube(url: string, model: string, config: CommandConfig, detailed = false, onStatus?: (msg: string) => void): Promise<string> {
 	const videoId = extractYouTubeId(url);
 	if (!videoId) throw new Error('Could not parse a YouTube video ID from that URL.');
+
+	// Auto-start the Vizier server if it isn't running but has been set up.
+	const ensured = await ensureVizierServer(config.serverUrl);
+	if (ensured === 'offline' || ensured === 'no-setup') {
+		throw new Error('TRANSCRIPT_SERVER_UNREACHABLE');
+	}
 
 	let response: Awaited<ReturnType<typeof requestUrl>>;
 	try {
@@ -991,12 +998,15 @@ export async function executeHandwriting(
 	for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i] ?? 0);
 	const base64 = btoa(binary);
 
-	// 2. Run OCR via dedicated server
+	// 2. Run OCR via dedicated server (auto-start it if set up but not running)
 	replaceMessage('assistant', 'Transcribing handwriting…');
 	let transcriptionText = '';
 
+	const ensured = await ensureVizierServer(config.serverUrl);
 	let ocrRes: Awaited<ReturnType<typeof requestUrl>>;
-	try {
+	if (ensured === 'offline' || ensured === 'no-setup') {
+		ocrRes = { status: 0 } as never;
+	} else try {
 		ocrRes = await requestUrl({
 			url: `${config.serverUrl}/ocr`,
 			method: 'POST',

@@ -27,6 +27,8 @@ export interface FeatureFlags {
 	briefing: boolean;
 	/** Verbose conversation-flow logging to vizier_debug.log for analysis. */
 	debugLog: boolean;
+	/** Auto-start the local Vizier server (transcripts, Wikipedia, OCR) with Obsidian, if setup was done. */
+	autoStartServer: boolean;
 }
 
 // ── Main settings interface ────────────────────────────────────────────────
@@ -120,6 +122,7 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 		intake:    false,
 		briefing:  false,
 		debugLog:  false,
+		autoStartServer: true,
 	},
 
 	commandModules: { ...DEFAULT_COMMAND_MODULES },
@@ -491,6 +494,15 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.addToggle(t => t
 				.setValue(this.plugin.settings.features.briefing)
 				.onChange(async (v) => { this.plugin.settings.features.briefing = v; await this.plugin.saveSettings(); }));
+
+		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setName('Auto-start Vizier server')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setDesc('Start the local Python helper server (YouTube transcripts, Wikipedia lookups, OCR) together with Obsidian, and on demand when a feature needs it. Only applies after the one-time server setup has been run.')
+			.addToggle(t => t
+				.setValue(this.plugin.settings.features.autoStartServer ?? true)
+				.onChange(async (v) => { this.plugin.settings.features.autoStartServer = v; await this.plugin.saveSettings(); }));
 
 		new Setting(containerEl)
 			.setName('Debug logging')

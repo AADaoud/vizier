@@ -17,6 +17,56 @@ import { showWikiSearchModal } from '../ui/WikiSearchModal';
 import { promptManualPerson, promptManualEvent } from '../ui/ManualEntryModal';
 import { promptModal } from '../ui/PromptModal';
 import { showImagePickerModal } from '../ui/ImagePickerModal';
+import { ensureVizierServer } from '../server_lifecycle';
+
+// ── Creation options ──────────────────────────────────────────────────────
+
+/**
+ * How entity creation behaves. Slash commands run interactive (modals for
+ * Wikipedia disambiguation, image picking, manual entry). The agent tool path
+ * runs non-interactive: never open a modal mid-agent-run — auto-pick the top
+ * Wikipedia result, take the first image, and fail fast with a clear message
+ * when there is nothing to pick.
+ */
+export interface EntityCreateOptions {
+	interactive?: boolean;
+	/** Optional description/context (used for ideas in non-interactive mode). */
+	description?: string;
+}
+
+type WikiSelection = WikiSearchResult | { custom: true } | null;
+
+async function selectWikiResult(
+	app: App,
+	results: WikiSearchResult[],
+	name: string,
+	interactive: boolean
+): Promise<WikiSelection> {
+	if (interactive) return showWikiSearchModal(app, results);
+	const top = results[0];
+	if (!top) {
+		throw new Error(`No Wikipedia results for "${name}". Create a regular note with write_note instead, or ask the user for details.`);
+	}
+	return top;
+}
+
+/**
+ * Shared server pre-flight. Interactive callers get a chat message and a
+ * `false` return; non-interactive (agent) callers get a thrown error so the
+ * tool layer reports a real failure instead of a success-looking message.
+ */
+async function wikiServerReady(
+	serverUrl: string,
+	interactive: boolean,
+	replaceMessage: AddMessage
+): Promise<boolean> {
+	const serverStatus = await checkWikiServer(serverUrl);
+	if (serverStatus === 'ok') return true;
+	const msg = serverStatus === 'offline' ? SERVER_OFFLINE_MSG : WIKI_API_MISSING_MSG;
+	if (!interactive) throw new Error(msg);
+	replaceMessage('assistant', msg);
+	return false;
+}
 
 // ── Ollama JSON schemas ────────────────────────────────────────────────────
 
@@ -99,26 +149,24 @@ async function downloadImage(app: App, imageUrl: string, attachFolder: string): 
 	return filename;
 }
 
-const SERVER_OFFLINE_MSG =
-	'Vizier server is not running. Use **Vizier: Setup / start Vizier server** from the command palette to start it.';
+export const SERVER_OFFLINE_MSG =
+	'Vizier server is not running and could not be auto-started. Use **Vizier: Setup / start Vizier server** from the command palette to start it.';
 const WIKI_API_MISSING_MSG =
 	'`wikipedia-api` is not installed in the Vizier venv. Restart the server — setup will install it automatically.';
 
 type WikiServerStatus = 'ok' | 'offline' | 'no-wiki-api';
 
 async function checkWikiServer(serverUrl: string): Promise<WikiServerStatus> {
-	try {
-		const health = await requestUrl({ url: `${serverUrl}/health`, throw: false });
-		if (health.status === 0) return 'offline';
-	} catch {
-		return 'offline';
-	}
-	// Server is up — probe the search endpoint with an empty query to detect missing library
+	// Auto-starts the server when possible (registered by the plugin on load).
+	const ensured = await ensureVizierServer(serverUrl);
+	if (ensured === 'offline' || ensured === 'no-setup') return 'offline';
+	// Server is up — probe the search endpoint to detect missing library
 	try {
 		const probe = await requestUrl({
 			url: `${serverUrl}/wiki/search?q=test&limit=1`,
 			throw: false,
 		});
+		if (probe.status === 0) return 'offline';
 		if (probe.status === 503) return 'no-wiki-api';
 	} catch {
 		return 'offline';
@@ -258,7 +306,9 @@ export async function executeCreatePerson(
 	model: string,
 	config: CommandConfig,
 	settings: AIAgentSettings,
+	opts: EntityCreateOptions = {},
 ): Promise<void> {
+	const interactive = opts.interactive !== false;
 	if (!name.trim()) {
 		addMessage('assistant', 'Usage: `/person <name>` — e.g. `/person Henry Kissinger`');
 		return;
@@ -266,13 +316,11 @@ export async function executeCreatePerson(
 
 	addMessage('assistant', `Searching Wikipedia for **${name}**…`);
 
-	const serverStatus = await checkWikiServer(config.serverUrl);
-	if (serverStatus === 'offline') { replaceMessage('assistant', SERVER_OFFLINE_MSG); return; }
-	if (serverStatus === 'no-wiki-api') { replaceMessage('assistant', WIKI_API_MISSING_MSG); return; }
+	if (!await wikiServerReady(config.serverUrl, interactive, replaceMessage)) return;
 
 	const results = await wikiSearch(config.serverUrl, name);
 
-	const selection = await showWikiSearchModal(app, results);
+	const selection = await selectWikiResult(app, results, name, interactive);
 	if (!selection) {
 		replaceMessage('assistant', 'Cancelled.');
 		return;
@@ -319,7 +367,10 @@ export async function executeCreatePerson(
 
 		let image = '';
 		if (pageData.image_urls.length > 0) {
-			const chosenUrl = await showImagePickerModal(app, pageData.image_urls);
+			// Non-interactive (agent) path: take the first image, no modal.
+			const chosenUrl = interactive
+				? await showImagePickerModal(app, pageData.image_urls)
+				: pageData.image_urls[0] ?? null;
 			if (chosenUrl) {
 				replaceMessage('assistant', 'Downloading image…');
 				try {
@@ -363,7 +414,9 @@ export async function executeCreateEvent(
 	model: string,
 	config: CommandConfig,
 	settings: AIAgentSettings,
+	opts: EntityCreateOptions = {},
 ): Promise<void> {
+	const interactive = opts.interactive !== false;
 	if (!title.trim()) {
 		addMessage('assistant', 'Usage: `/event <title>` — e.g. `/event Cuban Missile Crisis`');
 		return;
@@ -371,13 +424,11 @@ export async function executeCreateEvent(
 
 	addMessage('assistant', `Searching Wikipedia for **${title}**…`);
 
-	const serverStatus = await checkWikiServer(config.serverUrl);
-	if (serverStatus === 'offline') { replaceMessage('assistant', SERVER_OFFLINE_MSG); return; }
-	if (serverStatus === 'no-wiki-api') { replaceMessage('assistant', WIKI_API_MISSING_MSG); return; }
+	if (!await wikiServerReady(config.serverUrl, interactive, replaceMessage)) return;
 
 	const results = await wikiSearch(config.serverUrl, title);
 
-	const selection = await showWikiSearchModal(app, results);
+	const selection = await selectWikiResult(app, results, title, interactive);
 	if (!selection) {
 		replaceMessage('assistant', 'Cancelled.');
 		return;
@@ -458,13 +509,17 @@ export async function executeCreateIdea(
 	model: string,
 	config: CommandConfig,
 	settings: AIAgentSettings,
+	opts: EntityCreateOptions = {},
 ): Promise<void> {
+	const interactive = opts.interactive !== false;
 	if (!concept.trim()) {
 		addMessage('assistant', 'Usage: `/idea <concept>` — e.g. `/idea Realpolitik`');
 		return;
 	}
 
-	const description = await promptModal(app, `Idea: ${concept}`, 'Optional: describe this concept in your own words…');
+	const description = interactive
+		? await promptModal(app, `Idea: ${concept}`, 'Optional: describe this concept in your own words…')
+		: opts.description ?? '';
 
 	addMessage('assistant', `Generating idea note for **${concept}**…`);
 
@@ -816,7 +871,9 @@ export async function executeCreateEntity(
 	model: string,
 	config: CommandConfig,
 	settings: AIAgentSettings,
+	opts: EntityCreateOptions = {},
 ): Promise<void> {
+	const interactive = opts.interactive !== false;
 	const pipeIdx = args.indexOf('|');
 	const entityType = (pipeIdx !== -1 ? args.slice(0, pipeIdx).trim() : 'entity').toLowerCase() || 'entity';
 	const name = (pipeIdx !== -1 ? args.slice(pipeIdx + 1).trim() : args.trim());
@@ -828,18 +885,18 @@ export async function executeCreateEntity(
 
 	addMessage('assistant', `Searching Wikipedia for **${name}**…`);
 
-	const serverStatus = await checkWikiServer(config.serverUrl);
-	if (serverStatus === 'offline') { replaceMessage('assistant', SERVER_OFFLINE_MSG); return; }
-	if (serverStatus === 'no-wiki-api') { replaceMessage('assistant', WIKI_API_MISSING_MSG); return; }
+	if (!await wikiServerReady(config.serverUrl, interactive, replaceMessage)) return;
 
 	const results = await wikiSearch(config.serverUrl, name);
-	const selection = await showWikiSearchModal(app, results);
+	const selection = await selectWikiResult(app, results, name, interactive);
 	if (!selection) { replaceMessage('assistant', 'Cancelled.'); return; }
 
 	let note: EntityNote;
 
 	if ('custom' in selection) {
-		const description = await promptModal(app, `Create ${entityType} note`, 'Brief description (optional)…') ?? '';
+		const description = interactive
+			? await promptModal(app, `Create ${entityType} note`, 'Brief description (optional)…') ?? ''
+			: opts.description ?? '';
 		note = { type: entityType, name, description, wikipedia: '', related: [], tags: [entityType] };
 	} else {
 		replaceMessage('assistant', `Fetching page data for **${selection.title}**…`);

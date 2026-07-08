@@ -1,7 +1,9 @@
 import { App, Modal, Notice, FileSystemAdapter, requestUrl } from 'obsidian';
 import { type ChildProcess, spawn, type SpawnOptions } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../utils/logger';
+import type { EnsureServerResult } from '../server_lifecycle';
 
 const _proc = (globalThis as Record<string, unknown>)['process'] as { env: Record<string, string>; platform?: string } | undefined;
 const IS_WINDOWS = _proc?.platform === 'win32';
@@ -126,6 +128,41 @@ export class TranscriptServerManager {
 			// Resolve after 2 s even if stdout line wasn't seen (older Python versions)
 			setTimeout(resolve, 2000);
 		});
+	}
+
+	/** True once initial setup (venv creation) has been completed. */
+	get isSetupDone(): boolean {
+		try {
+			return fs.existsSync(venvPython(this.pluginDir));
+		} catch {
+			return false;
+		}
+	}
+
+	private ensuring: Promise<EnsureServerResult> | null = null;
+
+	/**
+	 * Make sure the server is up. If it isn't reachable but setup was already
+	 * done, start it and wait for /health. Concurrent callers share one attempt.
+	 */
+	ensureServer(serverUrl: string): Promise<EnsureServerResult> {
+		if (this.ensuring) return this.ensuring;
+		this.ensuring = (async (): Promise<EnsureServerResult> => {
+			if (await this.isServerReachable(serverUrl)) return 'ok';
+			if (!this.isSetupDone) return 'no-setup';
+			try {
+				await this.startServer();
+			} catch {
+				return 'offline';
+			}
+			// Poll /health for up to 10 s — Python + lazy imports take a moment
+			for (let i = 0; i < 20; i++) {
+				if (await this.isServerReachable(serverUrl)) return 'started';
+				await new Promise(resolve => setTimeout(resolve, 500));
+			}
+			return 'offline';
+		})().finally(() => { this.ensuring = null; });
+		return this.ensuring;
 	}
 
 	stopServer(): void {

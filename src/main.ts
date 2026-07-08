@@ -18,6 +18,7 @@ import { VaultIndex } from './memory/vault_index';
 import { runContradictionScan } from './epistemic/contradiction_engine';
 import { schedulerTick, TICK_MS, STARTUP_DELAY } from './scheduler';
 import { beginActivity, updateActivity, endActivity } from './ui/activity';
+import { registerServerEnsurer } from './server_lifecycle';
 
 // ── Notice-based message helpers ───────────────────────────────────────────
 
@@ -80,18 +81,24 @@ export default class VizierPlugin extends Plugin {
 				const startReindex = () => {
 					beginActivity('reindex', 'Updating vault index');
 					void this.vaultIndex?.reindexVault(this.app, this.settings, (done, total) => {
-						if (done % 20 === 0) updateActivity('reindex', `${done}/${total} notes`);
+						if (done % 20 === 0 || done === total) updateActivity('reindex', `${done}/${total} notes`);
 					})
 						.then(r => {
-							if (r.aborted) endActivity('reindex', false, `Vault index stopped — embeddings failing (${r.embedFailures} chunks)`);
-							else if (r.chunksAdded > 0) {
+							if (r.aborted) {
+								endActivity('reindex', false, `Vault index stopped — embeddings failing (${r.embedFailures} chunks)`);
+								// The activity ticker only shows inside the chat view —
+								// surface aborts as a Notice so they are never invisible.
+								new Notice(`Vizier: vault indexing stopped early — embedding requests kept failing (${r.embedFailures} chunks). Check Ollama and the embedding model, then run "Rebuild vault search index".`, 10_000);
+							}
+							else if (r.chunksAdded > 0 || r.embedFailures > 0) {
 								const failNote = r.embedFailures > 0 ? ` (${r.embedFailures} chunks failed)` : '';
-								endActivity('reindex', true, `Vault index updated (${r.chunksAdded} new chunks)${failNote}`);
+								endActivity('reindex', r.embedFailures === 0, `Vault index updated (${r.chunksAdded} new chunks)${failNote}`);
 							}
 							else endActivity('reindex', true, undefined, true); // nothing changed — vanish quietly
 						})
 						.catch((err: unknown) => {
 							endActivity('reindex', false, 'Vault index failed — check embedding model');
+							new Notice(`Vizier: vault indexing failed — ${err instanceof Error ? err.message : String(err)}`, 10_000);
 							console.warn('[Vizier] background vault reindex failed:', err);
 						});
 				};
@@ -136,6 +143,26 @@ export default class VizierPlugin extends Plugin {
 
 		this.serverManager = new TranscriptServerManager(this.app, relDir);
 
+		// Let commands and agent tools auto-start the server on demand
+		// (transcripts, Wikipedia lookups, OCR) instead of failing with
+		// "server not running" and asking the user to start it by hand.
+		registerServerEnsurer((url) => this.serverManager.ensureServer(url));
+
+		// Auto-start with Obsidian when setup was already done. Deferred so it
+		// never competes with vault load; failure is quiet — on-demand ensure
+		// (or the setup modal) covers it later.
+		if (this.settings.features.autoStartServer ?? true) {
+			this.app.workspace.onLayoutReady(() => {
+				window.setTimeout(() => {
+					if (!this.serverManager.isSetupDone) return;
+					void this.serverManager.ensureServer(this.settings.serverUrl).then(r => {
+						if (r === 'started') console.debug('[Vizier] server auto-started.');
+						else if (r === 'offline') console.warn('[Vizier] server auto-start failed — start it via "Setup / start Vizier server".');
+					});
+				}, 3000);
+			});
+		}
+
 		this.registerView(
 			VIEW_TYPE_AI_CHAT,
 			(leaf) => new ChatView(leaf, this.settings, this)
@@ -172,7 +199,7 @@ export default class VizierPlugin extends Plugin {
 				new Notice('Rebuilding vault index… this may take a moment.');
 				beginActivity('reindex', 'Rebuilding vault index');
 				void this.vaultIndex.reindexVault(this.app, this.settings, (done, total) => {
-					if (done % 10 === 0) updateActivity('reindex', `${done}/${total} notes`);
+					if (done % 10 === 0 || done === total) updateActivity('reindex', `${done}/${total} notes`);
 				})
 					.then((r) => {
 						endActivity('reindex', !r.aborted, r.aborted ? 'Vault index stopped — embeddings failing' : `Vault index rebuilt (${r.chunksAdded} chunks added)`);
@@ -594,7 +621,8 @@ export default class VizierPlugin extends Plugin {
 		// Deep merge roles (new field — may be absent in old saved data)
 		const base = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
 		if (!base.roles) base.roles = DEFAULT_SETTINGS.roles;
-		if (!base.features) base.features = DEFAULT_SETTINGS.features;
+		// Merge feature flags so newly added flags get their defaults
+		base.features = { ...DEFAULT_SETTINGS.features, ...(loaded?.features ?? {}) };
 		// Per-role: merge so existing models are preserved
 		for (const role of ['default', 'utility', 'research', 'embedding'] as const) {
 			if (!base.roles[role]?.models?.length) {

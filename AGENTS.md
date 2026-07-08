@@ -35,7 +35,13 @@
 
 **External services used:**
 - `r.jina.ai` — article fetching (converts any URL to clean markdown; free, no auth)
-- `vizier_server.py` — local Python HTTP server; provides YouTube transcripts (`/transcript`) and handwriting OCR (`/ocr`) on port 11435. Each route loads its dependencies lazily so a missing package only breaks that route, not the whole server.
+- `vizier_server.py` — local Python HTTP server; provides YouTube transcripts (`/transcript`), Wikipedia lookups (`/wiki/*`), and handwriting OCR (`/ocr`) on port 11435. Each route loads its dependencies lazily so a missing package only breaks that route, not the whole server. Lifecycle: `src/server_lifecycle.ts` — the plugin registers an ensurer on load, and any feature that needs the server calls `ensureVizierServer(serverUrl)`, which auto-starts it (once setup has been done) instead of failing. It also auto-starts with Obsidian (toggle: `features.autoStartServer`) and is stopped on plugin unload.
+
+**Agent-run conventions:**
+- Tool handlers (`src/agent/tool_execution.ts`) return strings; a result starting with `ERROR:` is reported to the model as a failed call. Real failures must use that prefix (plus do-not-retry guidance where appropriate) — a human-readable error returned as a "success" makes the model retry in a loop.
+- Agent tool paths must never open modals. Entity creation runs non-interactive (`EntityCreateOptions.interactive: false` → top Wikipedia result auto-picked, first image taken, no prompts); interactive modals are for slash commands only.
+- `runAgentLoop` accepts an `AbortSignal`; the chat Stop button aborts the loop itself (LLM calls and tool execution stop), not just the event rendering.
+- Structured output everywhere (agent path `llm_core.callStructured`, command path `utils/ollama.callOllamaStructured`) disables thinking and coerces fenced/`<think>`-wrapped JSON — never add a bare `JSON.parse` of model output.
 
 ## Chat history
 

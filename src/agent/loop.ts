@@ -186,9 +186,13 @@ export async function runAgentLoop(
 	app: App,
 	settings: AIAgentSettings,
 	onEvent: (event: AgentEvent) => void,
-	memories: Array<{ text: string; category: string }> = []
+	memories: Array<{ text: string; category: string }> = [],
+	signal?: AbortSignal
 ): Promise<void> {
 	const startTime  = Date.now();
+	// Stop means stop: no more LLM calls, no more tool executions (tools can
+	// open modals — a run that only *ignores* events keeps spawning them).
+	const aborted = () => signal?.aborted === true;
 	const cfg        = buildLLMConfig(settings);
 	const toolsUsed: string[] = [];
 	let   ok         = true;
@@ -254,6 +258,12 @@ export async function runAgentLoop(
 	];
 
 	const lastToolKeys = new Set<string>(); // loop-breaker state
+	// Second loop-breaker: consecutive failures per tool NAME. The identical-
+	// params breaker misses the common failure loop where the model retries a
+	// broken tool with slightly different params each round (e.g. create_entity
+	// against an offline server).
+	const consecutiveFailures = new Map<string, number>();
+	const FAILURE_BREAK_AT = 2;
 	let round = 0;
 	let forceProseRound = false; // set by loop-breaker
 
@@ -262,6 +272,7 @@ export async function runAgentLoop(
 
 	try {
 		while (round < MAX_ROUNDS) {
+			if (aborted()) return;
 			round++;
 
 			// ── Compact if needed ──────────────────────────────────────
@@ -342,6 +353,7 @@ export async function runAgentLoop(
 			});
 
 			for (const call of validCalls) {
+				if (aborted()) return;
 				onEvent({ type: 'tool_start', name: call.name, params: call.params });
 
 				const result = await executeTool(call, app, settings, { readNoteChars });
@@ -362,6 +374,19 @@ export async function runAgentLoop(
 					: result.output;
 
 				toolResultLines.push(`TOOL ${call.name} ${result.ok ? 'SUCCESS' : 'ERROR'}:\n${capped}`);
+
+				// Track repeated failures of the same tool across rounds
+				if (result.ok) {
+					consecutiveFailures.delete(call.name);
+				} else {
+					const n = (consecutiveFailures.get(call.name) ?? 0) + 1;
+					consecutiveFailures.set(call.name, n);
+					if (n >= FAILURE_BREAK_AT) {
+						dbg.log(`Failure-breaker fired: ${call.name} failed ${n}x`, { last_error: result.output.slice(0, 300) });
+						forceProseRound = true;
+						toolResultLines.push(`[SYSTEM] The tool "${call.name}" has now failed ${n} times in a row. STOP calling it. Report the error to the user and suggest what they can do about it.`);
+					}
+				}
 			}
 
 			if (toolResultLines.length > 0) {
@@ -378,6 +403,8 @@ export async function runAgentLoop(
 			// If no tools were called and not done, model should have responded in prose — stream it
 			if (toolList.calls.length === 0) break;
 		}
+
+		if (aborted()) return;
 
 		// ── Stream final prose response ────────────────────────────────
 		let finalText = '';
@@ -398,7 +425,7 @@ export async function runAgentLoop(
 			.join('\n\n');
 
 		// ── Verifier (Phase 5): one corrective round on effectful runs ─
-		if (isEffectfulRun(toolsUsed)) {
+		if (isEffectfulRun(toolsUsed) && !aborted()) {
 			beginActivity('verify', 'Verifying the work');
 			try {
 				const verdict = await verifyRun(cfg, userMessage, transcript());
@@ -445,7 +472,7 @@ export async function runAgentLoop(
 		}
 
 		// ── Skill distillation (Phase 5): learn from multi-step successes ─
-		if (round >= 2 && toolsUsed.length >= 2) {
+		if (round >= 2 && toolsUsed.length >= 2 && !aborted()) {
 			const t = transcript();
 			beginActivity('skill', 'Distilling a skill from this session');
 			void distillSkill(app, settings, t, toolsUsed).then(notePath => {

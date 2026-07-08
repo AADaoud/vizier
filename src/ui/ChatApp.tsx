@@ -205,6 +205,9 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	// boolean is not enough: resetting it for run N+1 would let zombie events
 	// from run N through, corrupting the new message's chips and tokens.
 	const runIdRef = useRef(0);
+	// Abort controller for the in-flight agent run. Ignoring events is not
+	// enough — the loop would keep executing tools (which can open modals).
+	const abortRef = useRef<AbortController | null>(null);
 
 	const isLoading = commandLoading || streaming;
 	const isSplash  = messages.length === 0;
@@ -325,6 +328,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 
 	const stopRun = useCallback(() => {
 		runIdRef.current++; // invalidate the in-flight run
+		abortRef.current?.abort(); // actually stop the loop (LLM calls, tools)
 		setAgentStatus(null);
 		setStreaming(false);
 		setMessages(prev => {
@@ -340,6 +344,8 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 		setStreaming(true);
 		setAgentStatus('Thinking…');
 		const myRun = ++runIdRef.current;
+		abortRef.current = new AbortController();
+		const signal = abortRef.current.signal;
 
 		// Add user message + blank assistant placeholder
 		setMessages(prev => [
@@ -425,7 +431,8 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 						});
 					}
 				},
-				memories
+				memories,
+				signal
 			);
 
 			// Post-turn memory extraction (non-blocking, only if memory feature enabled)

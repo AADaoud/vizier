@@ -146,28 +146,40 @@ async function applyEntityActions(
 	settings: AIAgentSettings,
 ): Promise<void> {
 	const linkedNames: string[] = [];
+	const failures: string[] = [];
 
 	for (const candidate of candidates) {
 		if (candidate.action === 'skip') continue;
 
 		if (candidate.action === 'create' || (candidate.action === 'link' && !candidate.existingFile)) {
-			// Create the entity note first
+			// Create the entity note first. Non-interactive: the user already
+			// confirmed the batch in the extraction modal — auto-pick the top
+			// Wikipedia result rather than opening another modal per entity,
+			// and let failures throw so they can be reported.
 			const noop: AddMessage = () => undefined;
 			const cmdConfig: CommandConfig = { ollamaUrl: config.ollamaUrl, serverUrl: config.serverUrl };
+			const opts = { interactive: false, description: candidate.context };
 			try {
 				if (candidate.type === 'person') {
-					await executeCreatePerson(candidate.name, app, noop, noop, model, cmdConfig, settings);
+					await executeCreatePerson(candidate.name, app, noop, noop, model, cmdConfig, settings, opts);
 				} else if (candidate.type === 'event') {
-					await executeCreateEvent(candidate.name, app, noop, noop, model, cmdConfig, settings);
+					await executeCreateEvent(candidate.name, app, noop, noop, model, cmdConfig, settings, opts);
 				} else {
-					await executeCreateIdea(candidate.name, app, noop, noop, model, cmdConfig, settings);
+					await executeCreateIdea(candidate.name, app, noop, noop, model, cmdConfig, settings, opts);
 				}
-			} catch { /* continue */ }
+			} catch (err) {
+				// Don't fail the whole batch — but never swallow it silently either.
+				failures.push(`**${candidate.name}** (${err instanceof Error ? err.message : String(err)})`);
+				continue;
+			}
 		}
 
 		linkedNames.push(candidate.name);
 	}
 
+	if (failures.length > 0) {
+		addMessage('assistant', `Could not create: ${failures.join(', ')}`);
+	}
 	if (linkedNames.length === 0) return;
 
 	// Append ## Related section to clip note

@@ -63,4 +63,33 @@ describe('callOllamaStructured()', () => {
 		await expect(callOllamaStructured({ ollamaUrl: 'u', model: 'm', messages: [] }))
 			.rejects.toThrow(/invalid JSON/);
 	});
+
+	// v0.7 hardening: cloud/thinking models wrap structured output in ```json
+	// fences or <think> blocks — a bare JSON.parse used to fail here and made
+	// entity creation error out after the user had already answered the modal.
+	it('parses JSON wrapped in a ```json fence (cloud model behavior)', async () => {
+		mockRequest.mockResolvedValueOnce(resp(200, { message: { content: '```json\n{"title":"T"}\n```' } }));
+		const out = await callOllamaStructured<{ title: string }>({ ollamaUrl: 'u', model: 'm', messages: [] });
+		expect(out).toEqual({ title: 'T' });
+	});
+
+	it('parses JSON preceded by a <think> block (thinking model behavior)', async () => {
+		mockRequest.mockResolvedValueOnce(resp(200, { message: { content: '<think>hmm</think>{"score":2}' } }));
+		const out = await callOllamaStructured<{ score: number }>({ ollamaUrl: 'u', model: 'm', messages: [] });
+		expect(out).toEqual({ score: 2 });
+	});
+
+	it('disables the thinking phase (think:false) on structured calls', async () => {
+		mockRequest.mockResolvedValueOnce(resp(200, { message: { content: '{}' } }));
+		await callOllamaStructured({ ollamaUrl: 'u', model: 'm', messages: [] });
+		const body = JSON.parse((mockRequest.mock.calls[0][0] as { body: string }).body) as { think?: boolean };
+		expect(body.think).toBe(false);
+	});
+});
+
+describe('callOllama() thinking models', () => {
+	it('strips a leading <think> block from prose responses', async () => {
+		mockRequest.mockResolvedValueOnce(resp(200, { message: { content: '<think>reasoning…</think>\nThe answer.' } }));
+		expect(await callOllama({ ollamaUrl: 'u', model: 'm', messages: [] })).toBe('The answer.');
+	});
 });

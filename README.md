@@ -131,6 +131,8 @@ These features require a small local Python server (`vizier_server.py`) that run
 
 **One-click setup:** Open the Command Palette and run **"Vizier: Setup / start Vizier server"**. The modal will detect Python 3, create a virtual environment, install dependencies, and start the server automatically. If the server is already running from a previous session, clicking Start will detect this and confirm without restarting.
 
+**Auto-start:** After the one-time setup, the server starts automatically with Obsidian and on demand whenever a feature needs it (transcripts, Wikipedia lookups, OCR), and stops when Obsidian closes. This can be turned off with **Settings → Vizier → Auto-start Vizier server**.
+
 On first use of `/handwriting`, you will be prompted to download the OCR model files (~1.5 GB including PyTorch). This is a one-time download.
 
 **Manual setup (fallback):**

@@ -313,27 +313,39 @@ async function handleCreateEntity(
 	const context = str(params, 'context');
 	if (!name) return 'ERROR: create_entity requires a name parameter.';
 
+	// Refuse duplicates instead of silently creating "Name 1" — the common
+	// cause is the model retrying a create that already succeeded.
+	const entityFolders = [settings.peopleFolder, settings.eventsFolder, settings.ideasFolder, settings.entitiesFolder];
+	const existing = findEntityByName(app, name, entityFolders);
+	if (existing) {
+		return `Entity [[${existing.basename}]] already exists at ${existing.path} — no new note created. Link to it with link_entities or read it with read_note.`;
+	}
+
 	const capture = captureMessages();
-	const args = context ? `${name} | ${context}` : name;
+	const model = settings.roles.default.models[0] ?? settings.defaultModel;
+	// Agent runs are non-interactive: no Wikipedia-disambiguation or image
+	// modals mid-run — the top result is taken automatically.
+	const opts = { interactive: false, description: context };
 
 	try {
 		switch (type) {
 			case 'person':
-				await executeCreatePerson(name, app, capture.addMessage, capture.replaceMessage, cfg.ollamaUrl.includes('model') ? '' : settings.roles.default.models[0] ?? settings.defaultModel, cfg, settings);
+				await executeCreatePerson(name, app, capture.addMessage, capture.replaceMessage, model, cfg, settings, opts);
 				break;
 			case 'event':
-				await executeCreateEvent(name, app, capture.addMessage, capture.replaceMessage, settings.roles.default.models[0] ?? settings.defaultModel, cfg, settings);
+				await executeCreateEvent(name, app, capture.addMessage, capture.replaceMessage, model, cfg, settings, opts);
 				break;
 			case 'idea':
-				await executeCreateIdea(name, app, capture.addMessage, capture.replaceMessage, settings.roles.default.models[0] ?? settings.defaultModel, cfg, settings);
+				await executeCreateIdea(name, app, capture.addMessage, capture.replaceMessage, model, cfg, settings, opts);
 				break;
 			default:
-				await executeCreateEntity(`${type} | ${args}`, app, capture.addMessage, capture.replaceMessage, settings.roles.default.models[0] ?? settings.defaultModel, cfg, settings);
+				await executeCreateEntity(`${type} | ${name}`, app, capture.addMessage, capture.replaceMessage, model, cfg, settings, opts);
 				break;
 		}
 		return capture.last() || `Created entity: [[${name}]]`;
 	} catch (err) {
-		return `Failed to create entity: ${err instanceof Error ? err.message : String(err)}`;
+		const msg = err instanceof Error ? err.message : String(err);
+		return `ERROR: create_entity failed for "${name}": ${msg} Do NOT retry this call with the same parameters — either follow the guidance above or tell the user what failed.`;
 	}
 }
 

@@ -296,7 +296,7 @@ export class VaultIndex {
 			const file = files[i];
 			if (!file) continue;
 			try {
-				onProgress?.(i, files.length);
+				onProgress?.(i + 1, files.length);
 				// defer=true: don't rewrite the whole index after every file.
 				const r = await this.indexFile(file, app, settings, true);
 				chunksAdded   += r.added;
