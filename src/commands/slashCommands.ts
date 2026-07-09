@@ -5,6 +5,7 @@ import { mapReduceSummarize } from '../utils/chunking';
 import { Prompts } from '../prompts';
 import { ClipLearnModal } from '../ui/ClipLearnModal';
 import { sanitizeFilename, sanitizeTag, buildYamlTags, today } from '../utils/noteBuilder';
+import { prepareImageForVision } from '../utils/image';
 import { AIAgentSettings } from '../settings';
 import type { CommandCategory } from './categories';
 import { ensureVizierServer } from '../server_lifecycle';
@@ -982,6 +983,30 @@ function getAttachmentFolder(app: App): string {
 	return 'Attachments';
 }
 
+/**
+ * Best-effort raw-OCR pass against the local EasyOCR server. Used only as a
+ * second signal for the vision model when OCR assist is enabled — any failure
+ * (server off, not set up, easyocr missing, engine error) returns '' and the
+ * pipeline continues on the vision model alone.
+ */
+async function fetchOcrHint(base64Image: string, serverUrl: string): Promise<string> {
+	try {
+		const ensured = await ensureVizierServer(serverUrl);
+		if (ensured === 'offline' || ensured === 'no-setup') return '';
+		const res = await requestUrl({
+			url: `${serverUrl}/ocr`,
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ image: base64Image }),
+			throw: false,
+		});
+		if (res.status !== 200) return '';
+		return (res.json as { text?: string }).text ?? '';
+	} catch {
+		return '';
+	}
+}
+
 export async function executeHandwriting(
 	imageFile: File,
 	app: App,
@@ -989,75 +1014,50 @@ export async function executeHandwriting(
 	model: string,
 	config: CommandConfig,
 	notesFolder: string,
+	ocrAssist = false,
 ): Promise<void> {
-	// 1. Read image as base64
-	replaceMessage('assistant', 'Reading image…');
+	// 1. Decode, downscale, and re-encode the image before it goes anywhere —
+	// vision models see at most ~1-2 MP, so a full-resolution phone photo only
+	// slows encoding, transfer, and inference.
+	replaceMessage('assistant', 'Preparing image…');
 	const buffer = await imageFile.arrayBuffer();
-	const uint8 = new Uint8Array(buffer);
-	let binary = '';
-	for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i] ?? 0);
-	const base64 = btoa(binary);
+	const prepared = await prepareImageForVision(buffer, imageFile.type);
 
-	// 2. Run OCR via dedicated server (auto-start it if set up but not running)
+	// 2. Optional second signal: raw EasyOCR text from the local server.
+	let ocrHint = '';
+	if (ocrAssist) {
+		replaceMessage('assistant', 'Running OCR assist…');
+		ocrHint = await fetchOcrHint(prepared.base64, config.serverUrl);
+	}
+
+	// 3. Primary path: the vision model transcribes the image directly.
 	replaceMessage('assistant', 'Transcribing handwriting…');
 	let transcriptionText = '';
-
-	const ensured = await ensureVizierServer(config.serverUrl);
-	let ocrRes: Awaited<ReturnType<typeof requestUrl>>;
-	if (ensured === 'offline' || ensured === 'no-setup') {
-		ocrRes = { status: 0 } as never;
-	} else try {
-		ocrRes = await requestUrl({
-			url: `${config.serverUrl}/ocr`,
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ image: base64 }),
-			throw: false,
-		});
-	} catch {
-		ocrRes = { status: 0 } as never;
-	}
-
-	if (ocrRes.status === 0) {
-		replaceMessage('assistant',
-			'The Vizier server is not running.\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start Vizier server"** to install dependencies and start it automatically.');
-		return;
-	}
-
-	if (ocrRes.status === 503) {
-		const errData = ocrRes.json as { error?: string };
-		replaceMessage('assistant',
-			`OCR dependencies not installed.\n\n${errData.error ?? ''}\n\nOpen the **Command Palette** (Ctrl/Cmd+P) and run **"Vizier: Setup / start Vizier server"** to install them.`);
-		return;
-	}
-
-	if (ocrRes.status !== 200) {
-		const errData = ocrRes.json as { error?: string };
-		replaceMessage('assistant', `OCR server error: ${errData.error ?? `HTTP ${ocrRes.status}`}`);
-		return;
-	}
-
-	const ocrData = ocrRes.json as { text: string };
-	transcriptionText = ocrData.text ?? '';
-
-	if (!transcriptionText.trim()) {
-		replaceMessage('assistant', 'OCR returned no text. Check the image is clear and contains handwriting.');
-		return;
-	}
-
-	// 3. Vision-assisted reconstruction (non-fatal, falls back to raw OCR)
 	try {
-		replaceMessage('assistant', 'Reconstructing with vision model…');
-		const visionResult = await callOllama({
+		transcriptionText = await callOllama({
 			ollamaUrl: config.ollamaUrl,
 			model,
-			messages: [{ role: 'user', content: Prompts.handwritingReconstruct(transcriptionText), images: [base64] }],
+			messages: [{
+				role: 'user',
+				content: Prompts.handwritingTranscribe(ocrHint.trim() || undefined),
+				images: [prepared.base64],
+			}],
 		});
-		if (visionResult.trim()) {
-			transcriptionText = visionResult;
+	} catch (err) {
+		if (ocrHint.trim()) {
+			// Vision model unavailable — raw OCR text beats failing outright.
+			transcriptionText = ocrHint;
+		} else {
+			const msg = err instanceof Error ? err.message : String(err);
+			replaceMessage('assistant',
+				`Transcription failed: ${msg}\n\nMake sure the configured model (**${model}**) supports vision (e.g. gemma3:4b or larger, qwen2.5-vl), or enable **Handwriting OCR assist** in settings as a fallback.`);
+			return;
 		}
-	} catch {
-		// vision pass failed — keep raw OCR text
+	}
+
+	if (!transcriptionText.trim() || /^EMPTY\.?$/i.test(transcriptionText.trim())) {
+		replaceMessage('assistant', 'No legible handwriting found in the image. Check it is clear, well-lit, and contains handwriting.');
+		return;
 	}
 
 	// 4. Save image to vault attachment folder

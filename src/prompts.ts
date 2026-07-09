@@ -132,19 +132,18 @@ export const Prompts = {
 		`SUMMARY:\n${summary}\n\n` +
 		`STUDY GUIDE:`,
 
-	// ── Handwriting OCR ──────────────────────────────────────────────────────
-	handwritingOCR: () =>
-		`You are a handwriting transcription system. Output ONLY the requested JSON.\n\n` +
-		`Examine the attached image and determine:\n` +
-		`1. Is it a legible handwritten note? (not blurry, not a printed document, not a photo without text)\n` +
-		`2. Does it contain handwritten text worth transcribing?\n` +
-		`3. If both: transcribe all visible text exactly, preserving line breaks as \\n.\n\n` +
-		`If the image is not legible or not a handwritten note, set transcription to "".\n` +
-		`Do NOT add commentary. Output only the JSON fields.`,
-
-	// ── Handwriting OCR: vision reconstruction pass ──────────────────────────
-	handwritingReconstruct: (ocrText: string) =>
-		`You are transcribing a handwritten note. The OCR engine produced this raw text:\n\n${ocrText}\n\nLook at the image and return the corrected transcription. Fix any OCR errors you can see. Preserve all content and line breaks. Return only the transcribed text, no commentary. If you cannot improve on the OCR output, return it unchanged.`,
+	// ── Handwriting: direct vision transcription (optional OCR-assist hint) ──
+	handwritingTranscribe: (ocrHint?: string) =>
+		`You are a handwriting transcription system.\n\n` +
+		`Look at the attached image and transcribe ALL handwritten text exactly as written:\n` +
+		`- Preserve line breaks and structure (headings, lists, indentation).\n` +
+		`- Do NOT correct the writer's spelling, grammar, or wording.\n` +
+		`- Write [illegible] for a word you genuinely cannot read.\n` +
+		`- If the image contains no legible handwriting, reply with exactly: EMPTY\n` +
+		(ocrHint
+			? `\nA conventional OCR engine produced this noisy draft of the same image. It often misreads handwriting — trust your own reading of the image and use the draft only to cross-check ambiguous words:\n${ocrHint}\n`
+			: '') +
+		`\nReturn ONLY the transcription (or EMPTY). No commentary.`,
 
 	// ── Read: summarize a note ─────────────────────────────────────────────
 	readSummarize: (basename: string, content: string) =>
