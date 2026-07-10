@@ -55,7 +55,7 @@ register('handwriting', (args, ctx) => {
 	}
 	ctx.clearPendingImage?.();
 	ctx.addMessage('assistant', 'Reading image…');
-	return executeHandwriting(file, ctx.app, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.handwritingFolder);
+	return executeHandwriting(file, ctx.app, ctx.replaceMessage, ctx.model, ctx.config, ctx.settings.handwritingFolder, ctx.settings.features.ocrAssist ?? false);
 });
 
 register('person', (args, ctx) =>

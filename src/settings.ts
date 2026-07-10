@@ -1,5 +1,6 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, requestUrl } from 'obsidian';
 import VizierPlugin from './main';
+import { ModelDownloadModal } from './ui/ServerSetupModal';
 import { setDebugLogging } from './debug_log';
 import { COMMAND_CATEGORIES, DEFAULT_COMMAND_MODULES, type ToggleableCategory } from './commands/categories';
 
@@ -29,6 +30,8 @@ export interface FeatureFlags {
 	debugLog: boolean;
 	/** Auto-start the local Vizier server (transcripts, Wikipedia, OCR) with Obsidian, if setup was done. */
 	autoStartServer: boolean;
+	/** /handwriting: also run the local EasyOCR engine as a second signal for the vision model. Heavy optional install. */
+	ocrAssist: boolean;
 }
 
 // ── Main settings interface ────────────────────────────────────────────────
@@ -123,6 +126,7 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 		briefing:  false,
 		debugLog:  false,
 		autoStartServer: true,
+		ocrAssist: false,
 	},
 
 	commandModules: { ...DEFAULT_COMMAND_MODULES },
@@ -161,6 +165,26 @@ export class AIAgentSettingTab extends PluginSettingTab {
 	constructor(app: App, plugin: VizierPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	/**
+	 * When OCR assist is switched on, offer the one-time EasyOCR install if the
+	 * server is up but the engine/models are missing. If the server isn't
+	 * running, just point at the setup command — never install unprompted.
+	 */
+	private async offerOcrInstall(): Promise<void> {
+		try {
+			const res = await requestUrl({ url: `${this.plugin.settings.serverUrl}/models/status`, throw: false });
+			if (res.status === 200) {
+				const data = res.json as { cached?: boolean; installed?: boolean };
+				if (!data.installed || !data.cached) {
+					new ModelDownloadModal(this.app, this.plugin.settings.serverUrl, this.plugin.serverManager.dir).open();
+				}
+				return;
+			}
+		} catch { /* server not reachable — fall through to the notice */ }
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
+		new Notice('OCR assist uses the Vizier server. Run "Vizier: Setup / start Vizier server" first, then toggle this again to install the OCR engine.', 8000);
 	}
 
 	display(): void {
@@ -209,7 +233,7 @@ export class AIAgentSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Vizier server URL')
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			.setDesc('Base URL of the local Vizier server (vizier_server.py). Provides YouTube transcripts and handwriting OCR.')
+			.setDesc('Base URL of the local Vizier server (vizier_server.py). Provides YouTube transcripts, Wikipedia lookups, and the optional handwriting OCR assist.')
 			.addText(text => text
 				.setPlaceholder('http://127.0.0.1:11435')
 				.setValue(this.plugin.settings.serverUrl)
@@ -503,6 +527,18 @@ export class AIAgentSettingTab extends PluginSettingTab {
 			.addToggle(t => t
 				.setValue(this.plugin.settings.features.autoStartServer ?? true)
 				.onChange(async (v) => { this.plugin.settings.features.autoStartServer = v; await this.plugin.saveSettings(); }));
+
+		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setName('Handwriting OCR assist')
+			.setDesc('Optional: also run the local EasyOCR engine as a second signal when /handwriting transcribes an image. The vision model alone works without this. Requires the Vizier server and a one-time ~1.5 GB install (PyTorch).')
+			.addToggle(t => t
+				.setValue(this.plugin.settings.features.ocrAssist ?? false)
+				.onChange(async (v) => {
+					this.plugin.settings.features.ocrAssist = v;
+					await this.plugin.saveSettings();
+					if (v) void this.offerOcrInstall();
+				}));
 
 		new Setting(containerEl)
 			.setName('Debug logging')
