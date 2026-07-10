@@ -82,6 +82,11 @@ export class TranscriptServerManager {
 		return this.process !== null && !this.process.killed;
 	}
 
+	/** Absolute plugin directory (venv lives here). */
+	get dir(): string {
+		return this.pluginDir;
+	}
+
 	/** Check if the server is reachable at the given URL. */
 	async isServerReachable(serverUrl: string): Promise<boolean> {
 		try {
@@ -200,7 +205,7 @@ export class ServerSetupModal extends Modal {
 		contentEl.createEl('h2', { text: 'Vizier server' });
 		contentEl.createEl('p', {
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			text: 'A small local Python server is required for YouTube transcripts, Wikipedia lookups (Human Network), and handwriting OCR. Click "Start" to set up and launch it automatically.',
+			text: 'A small local Python server is required for YouTube transcripts, Wikipedia lookups (Human Network), and the optional handwriting OCR assist. Click "Start" to set up and launch it automatically.',
 		});
 
 		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
@@ -280,7 +285,6 @@ export class ServerSetupModal extends Modal {
 				new Notice('Vizier server is running.');
 				this.onStarted();
 				this.close();
-				void this.checkModelsAndPrompt();
 				return;
 			}
 
@@ -291,7 +295,6 @@ export class ServerSetupModal extends Modal {
 				new Notice('Vizier server started.');
 				this.onStarted();
 				this.close();
-				void this.checkModelsAndPrompt();
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				log(`❌ ${msg}`);
@@ -303,19 +306,6 @@ export class ServerSetupModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
-	}
-
-	private async checkModelsAndPrompt(): Promise<void> {
-		const pluginDir = (this.manager as unknown as { pluginDir: string }).pluginDir;
-		try {
-			const res = await requestUrl({ url: `${this.serverUrl}/models/status`, throw: false });
-			if (res.status === 200) {
-				const data = res.json as { cached?: boolean; installed?: boolean };
-				if (!data.installed || !data.cached) {
-					new ModelDownloadModal(this.app, this.serverUrl, pluginDir).open();
-				}
-			}
-		} catch { /* ignore */ }
 	}
 
 	private isSetupDone(pluginDir: string): Promise<boolean> {
@@ -350,8 +340,9 @@ export class ServerSetupModal extends Modal {
 }
 
 /**
- * Modal shown after server start when OCR models haven't been downloaded yet.
- * Offers to download ~250 MB of EasyOCR model files in the background,
+ * Modal offering the one-time EasyOCR install for the optional OCR-assist
+ * feature (opened from the settings toggle, never automatically). Installs
+ * the ML libraries, then downloads ~250 MB of model files in the background,
  * with a spinner and polling until the download completes.
  */
 export class ModelDownloadModal extends Modal {
@@ -370,10 +361,9 @@ export class ModelDownloadModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		// eslint-disable-next-line obsidianmd/ui/sentence-case
-		contentEl.createEl('h2', { text: 'OCR setup' });
+		contentEl.createEl('h2', { text: 'OCR assist setup' });
 		contentEl.createEl('p', {
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
-			text: 'Handwriting OCR requires ML libraries (~1.5 GB including PyTorch) and model files. These are installed once and cached locally.',
+			text: 'OCR assist runs a local EasyOCR engine as a second signal alongside your vision model. It requires ML libraries (~1.5 GB including PyTorch) and model files, installed once and cached locally. /handwriting works without this — it just uses the vision model alone.',
 		});
 
 		const pre = contentEl.createEl('pre', { cls: 'vizier-setup-log' });
