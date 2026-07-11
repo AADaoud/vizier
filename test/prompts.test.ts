@@ -32,6 +32,19 @@ describe('Prompts', () => {
 		expect(p.trimEnd().endsWith('SUMMARY:')).toBe(true);
 	});
 
+	it('handwritingTranscribe without a hint never mentions an OCR draft', () => {
+		const p = Prompts.handwritingTranscribe();
+		expect(p).toMatch(/transcribe/i);
+		expect(p).toContain('EMPTY');
+		expect(p).not.toMatch(/draft/i);
+	});
+
+	it('handwritingTranscribe embeds the OCR hint as a cross-check', () => {
+		const p = Prompts.handwritingTranscribe('n0isy 0cr t3xt');
+		expect(p).toContain('n0isy 0cr t3xt');
+		expect(p).toMatch(/cross-check/i);
+	});
+
 	it('prompt builders are pure and deterministic', () => {
 		expect(Prompts.writeNote('x')).toBe(Prompts.writeNote('x'));
 		expect(Prompts.summarizeChunk('a', 'b')).toBe(Prompts.summarizeChunk('a', 'b'));
