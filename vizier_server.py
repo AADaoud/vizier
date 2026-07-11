@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Vizier server — YouTube transcripts, handwriting OCR, and Wikipedia lookup.
+Vizier server — YouTube transcripts, Wikipedia lookup, and optional OCR assist.
 
-Install: pip install youtube-transcript-api easyocr pillow wikipedia-api
+Install: pip install youtube-transcript-api wikipedia-api
+Optional (OCR assist only): pip install easyocr pillow
 Run:     python3 vizier_server.py
 """
 

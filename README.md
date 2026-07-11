@@ -38,7 +38,7 @@ Free-form chat runs through a **multi-round agent loop**: the model decides whic
 | `/clip learn <url>` | Clip with detailed notes plus a study guide popup — ideal for lectures |
 | `/transcribe <file or url>` | Transcribe an audio file or podcast URL via Whisper |
 | `/ingest <path>` | Ingest a book or PDF chapter-by-chapter into your vault |
-| `/handwriting` | OCR a photo of handwritten notes and save as a vault note |
+| `/handwriting` | Transcribe a photo of handwritten notes with your vision model and save as a vault note |
 
 ### Human Network
 
@@ -125,15 +125,19 @@ Vizier routes work across four roles so you can match each task to an appropriat
 2. Pull a model: `ollama pull gemma3:4b` (or any model you prefer)
 3. Set the model name in **Settings → Vizier → Default model**
 
-### YouTube transcripts, Wikipedia lookups & handwriting OCR
+### Handwriting transcription
+
+`/handwriting` sends the (downscaled) image straight to your configured vision-capable Ollama model (e.g. `gemma3:4b` or larger, `qwen2.5-vl`) — no server, no extra downloads.
+
+**Optional OCR assist:** for tricky pages you can enable **Settings → Vizier → Handwriting OCR assist**, which additionally runs a local EasyOCR engine and feeds its raw output to the vision model as a cross-check. This requires the Vizier server (below) and a one-time ~1.5 GB install (PyTorch + models); the toggle offers the install when the server is running.
+
+### YouTube transcripts, Wikipedia lookups & OCR assist
 
 These features require a small local Python server (`vizier_server.py`) that runs alongside Obsidian.
 
 **One-click setup:** Open the Command Palette and run **"Vizier: Setup / start Vizier server"**. The modal will detect Python 3, create a virtual environment, install dependencies, and start the server automatically. If the server is already running from a previous session, clicking Start will detect this and confirm without restarting.
 
-**Auto-start:** After the one-time setup, the server starts automatically with Obsidian and on demand whenever a feature needs it (transcripts, Wikipedia lookups, OCR), and stops when Obsidian closes. This can be turned off with **Settings → Vizier → Auto-start Vizier server**.
-
-On first use of `/handwriting`, you will be prompted to download the OCR model files (~1.5 GB including PyTorch). This is a one-time download.
+**Auto-start:** After the one-time setup, the server starts automatically with Obsidian and on demand whenever a feature needs it (transcripts, Wikipedia lookups, OCR assist), and stops when Obsidian closes. This can be turned off with **Settings → Vizier → Auto-start Vizier server**.
 
 **Manual setup (fallback):**
 ```bash
@@ -159,6 +163,7 @@ Articles are fetched via [Jina AI Reader](https://jina.ai/reader/) (`r.jina.ai`)
 | Clips folder | `Clips` | Vault folder where `/clip` saves notes |
 | AI notes folder | *(empty)* | Vault folder where `/write` saves notes (empty = vault root) |
 | Handwritten notes folder | `Handwritten Notes` | Vault folder where `/handwriting` saves notes |
+| Handwriting OCR assist | off | Also run a local EasyOCR engine as a second signal for `/handwriting` (heavy optional install) |
 | People folder | `Human Network/People` | Vault folder where `/person` saves notes |
 | Events folder | `Human Network/Events` | Vault folder where `/event` saves notes |
 | Ideas folder | `Human Network/Ideas` | Vault folder where `/idea` saves notes |
