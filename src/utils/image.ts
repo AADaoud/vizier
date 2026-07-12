@@ -182,3 +182,69 @@ export async function prepareImageBands(buffer: ArrayBuffer, mime: string): Prom
 		return { bands: [arrayBufferToBase64(buffer)], banded: false };
 	}
 }
+
+// ── Merging band transcriptions ─────────────────────────────────────────────
+// Adjacent bands overlap by ~15%, so the last line(s) of one transcription
+// reappear at the top of the next — but rarely verbatim (the model reads the
+// same ink slightly differently at each crop). Matching is therefore done on
+// normalized lines with a bigram-similarity tolerance.
+
+function normalizeLine(s: string): string {
+	return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function bigrams(s: string): Set<string> {
+	const out = new Set<string>();
+	for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
+	return out;
+}
+
+/** Dice coefficient over character bigrams — cheap fuzzy line equality. */
+export function lineSimilarity(a: string, b: string): number {
+	if (a === b) return 1;
+	if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+	const ba = bigrams(a), bb = bigrams(b);
+	let shared = 0;
+	for (const g of ba) if (bb.has(g)) shared++;
+	return (2 * shared) / (ba.size + bb.size);
+}
+
+function sameLine(a: string, b: string): boolean {
+	if (!a || !b) return false;
+	if (a === b) return true;
+	if (a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a))) return true;
+	return lineSimilarity(a, b) >= 0.75;
+}
+
+/** Lines to consider on each side of a band seam when deduplicating. */
+const SEAM_WINDOW = 6;
+
+/**
+ * Stitch per-band transcriptions into one text, dropping the lines duplicated
+ * by the band overlap. EMPTY/blank bands are skipped.
+ */
+export function mergeBandTranscriptions(parts: string[]): string {
+	const cleaned = parts
+		.map(p => p.trim())
+		.filter(p => p && !/^EMPTY\.?$/i.test(p));
+	if (cleaned.length === 0) return '';
+
+	let acc = (cleaned[0] ?? '').split('\n');
+	for (let i = 1; i < cleaned.length; i++) {
+		const next = (cleaned[i] ?? '').split('\n');
+		const maxK = Math.min(SEAM_WINDOW, acc.length, next.length);
+		let drop = 0;
+		// Longest run of trailing acc-lines matching leading next-lines wins.
+		for (let k = maxK; k >= 1; k--) {
+			let match = true;
+			for (let j = 0; j < k; j++) {
+				const a = normalizeLine(acc[acc.length - k + j] ?? '');
+				const b = normalizeLine(next[j] ?? '');
+				if (!sameLine(a, b)) { match = false; break; }
+			}
+			if (match) { drop = k; break; }
+		}
+		acc = acc.concat(next.slice(drop));
+	}
+	return acc.join('\n');
+}
