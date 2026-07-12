@@ -37,6 +37,58 @@ export function fitWithin(width: number, height: number, maxEdge: number): { wid
 	};
 }
 
+// ── Band segmentation ──────────────────────────────────────────────────────
+// A full notebook page downscaled to MAX_VISION_EDGE leaves each line of
+// handwriting ~15 px tall — too small for reliable transcription. Tall pages
+// are instead cut into overlapping horizontal bands, each rendered near full
+// width, so every line reaches the model at readable resolution. The overlap
+// guarantees no line is cut in half; the duplicated lines are removed when
+// the per-band transcriptions are merged.
+
+/** Target band height as a fraction of image width (band ≈ 1280×768 after scaling). */
+const BAND_ASPECT = 0.6;
+/** Fraction of a band's height shared with the next band. */
+const BAND_OVERLAP = 0.15;
+/** Hard cap on bands per image (latency grows linearly with band count). */
+const MAX_BANDS = 6;
+
+export interface BandPlan {
+	/** Source-space crop rects, top to bottom. A single entry means "don't slice". */
+	bands: { y: number; height: number }[];
+	/** Scale (≤ 1) applied when rendering each band. */
+	scale: number;
+}
+
+/** Decide how to slice an image of the given source dimensions into bands. */
+export function planBands(width: number, height: number, maxEdge = MAX_VISION_EDGE): BandPlan {
+	const whole: BandPlan = {
+		bands: [{ y: 0, height }],
+		scale: Math.min(1, maxEdge / Math.max(width, height, 1)),
+	};
+	if (width <= 0 || height <= 0) return whole;
+
+	let bandH = Math.round(width * BAND_ASPECT);
+	let overlap = Math.round(bandH * BAND_OVERLAP);
+	if (bandH >= height || bandH <= overlap) return whole;
+
+	let n = Math.ceil((height - overlap) / (bandH - overlap));
+	if (n <= 1) return whole;
+	if (n > MAX_BANDS) {
+		// Too tall for the cap — grow the bands so MAX_BANDS still cover the page.
+		n = MAX_BANDS;
+		bandH = Math.ceil((height + (n - 1) * overlap) / n);
+		overlap = Math.round(bandH * BAND_OVERLAP);
+	}
+
+	const step = (height - bandH) / (n - 1);
+	const bands: { y: number; height: number }[] = [];
+	for (let i = 0; i < n; i++) {
+		const y = Math.min(Math.round(i * step), height - 1);
+		bands.push({ y, height: Math.min(bandH, height - y) });
+	}
+	return { bands, scale: Math.min(1, maxEdge / width) };
+}
+
 export interface PreparedImage {
 	/** Base64 payload to send to the model (no data: prefix). */
 	base64: string;
@@ -82,5 +134,51 @@ export async function prepareImageForVision(buffer: ArrayBuffer, mime: string): 
 		}
 	} catch {
 		return { base64: arrayBufferToBase64(buffer), reencoded: false };
+	}
+}
+
+export interface PreparedBands {
+	/** One base64 JPEG per band, top to bottom (single entry when not sliced). */
+	bands: string[];
+	/** True when the image was actually sliced into multiple bands. */
+	banded: boolean;
+}
+
+/**
+ * Prepare an image as one or more transcription-ready bands. Short images pass
+ * through prepareImageForVision unchanged; tall pages are sliced per planBands.
+ * Falls back to the raw bytes as a single "band" when decoding fails.
+ */
+export async function prepareImageBands(buffer: ArrayBuffer, mime: string): Promise<PreparedBands> {
+	try {
+		const blob = new Blob([buffer], { type: mime || 'image/png' });
+		const bitmap = await createImageBitmap(blob);
+		try {
+			const plan = planBands(bitmap.width, bitmap.height);
+			if (plan.bands.length <= 1) {
+				const single = await prepareImageForVision(buffer, mime);
+				return { bands: [single.base64], banded: false };
+			}
+			const outW = Math.max(1, Math.round(bitmap.width * plan.scale));
+			const bands: string[] = [];
+			for (const band of plan.bands) {
+				const outH = Math.max(1, Math.round(band.height * plan.scale));
+				const canvas = document.createElement('canvas');
+				canvas.width = outW;
+				canvas.height = outH;
+				const cx = canvas.getContext('2d');
+				if (!cx) throw new Error('no 2d context');
+				cx.fillStyle = '#ffffff';
+				cx.fillRect(0, 0, outW, outH);
+				cx.drawImage(bitmap, 0, band.y, bitmap.width, band.height, 0, 0, outW, outH);
+				const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+				bands.push(dataUrl.slice(dataUrl.indexOf(',') + 1));
+			}
+			return { bands, banded: true };
+		} finally {
+			bitmap.close();
+		}
+	} catch {
+		return { bands: [arrayBufferToBase64(buffer)], banded: false };
 	}
 }
