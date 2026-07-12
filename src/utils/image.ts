@@ -69,7 +69,9 @@ export function planBands(width: number, height: number, maxEdge = MAX_VISION_ED
 
 	let bandH = Math.round(width * BAND_ASPECT);
 	let overlap = Math.round(bandH * BAND_OVERLAP);
-	if (bandH >= height || bandH <= overlap) return whole;
+	// Slicing only pays off when the page is meaningfully taller than one band —
+	// a second band that mostly re-reads the first just doubles latency.
+	if (height <= bandH * 1.3 || bandH <= overlap) return whole;
 
 	let n = Math.ceil((height - overlap) / (bandH - overlap));
 	if (n <= 1) return whole;

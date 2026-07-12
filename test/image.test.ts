@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { arrayBufferToBase64, fitWithin, prepareImageForVision, MAX_VISION_EDGE } from '../src/utils/image';
+import {
+	arrayBufferToBase64, fitWithin, prepareImageForVision, MAX_VISION_EDGE,
+	planBands, mergeBandTranscriptions, lineSimilarity,
+} from '../src/utils/image';
 
 function bytes(...values: number[]): ArrayBuffer {
 	return new Uint8Array(values).buffer;
@@ -52,6 +55,76 @@ describe('prepareImageForVision', () => {
 		const prepared = await prepareImageForVision(buf, 'image/png');
 		expect(prepared.reencoded).toBe(false);
 		expect(prepared.base64).toBe(Buffer.from(buf).toString('base64'));
+	});
+});
+
+describe('planBands', () => {
+	it('keeps short images as a single band', () => {
+		expect(planBands(1600, 1000).bands).toHaveLength(1);
+		expect(planBands(4000, 3000).bands).toHaveLength(1);
+	});
+
+	it('slices a tall page into overlapping bands that cover it fully', () => {
+		const { bands, scale } = planBands(2000, 6000);
+		expect(bands.length).toBeGreaterThan(1);
+		expect(bands.length).toBeLessThanOrEqual(6);
+		expect(bands[0]?.y).toBe(0);
+		const last = bands[bands.length - 1];
+		expect((last?.y ?? 0) + (last?.height ?? 0)).toBe(6000);
+		// consecutive bands overlap
+		for (let i = 1; i < bands.length; i++) {
+			const prev = bands[i - 1], cur = bands[i];
+			expect(cur!.y).toBeLessThan(prev!.y + prev!.height);
+		}
+		// bands render at width-based scale
+		expect(scale).toBeCloseTo(MAX_VISION_EDGE / 2000, 5);
+	});
+
+	it('caps the band count for extremely tall images', () => {
+		expect(planBands(1000, 50000).bands.length).toBeLessThanOrEqual(6);
+	});
+
+	it('handles degenerate dimensions without slicing', () => {
+		expect(planBands(0, 0).bands).toHaveLength(1);
+		expect(planBands(10, 5).bands).toHaveLength(1);
+	});
+});
+
+describe('lineSimilarity', () => {
+	it('is 1 for identical lines and 0 for disjoint lines', () => {
+		expect(lineSimilarity('hello world', 'hello world')).toBe(1);
+		expect(lineSimilarity('abcdef', 'xyz123')).toBe(0);
+	});
+
+	it('is high for near-identical OCR variants', () => {
+		expect(lineSimilarity('meeting notes tuesday', 'meting notes tuesday')).toBeGreaterThan(0.8);
+	});
+});
+
+describe('mergeBandTranscriptions', () => {
+	it('returns a single part unchanged', () => {
+		expect(mergeBandTranscriptions(['line one\nline two'])).toBe('line one\nline two');
+	});
+
+	it('drops the overlap-duplicated lines at the seam', () => {
+		const a = 'first line\nsecond line\nthird line';
+		const b = 'second line\nthird line\nfourth line';
+		expect(mergeBandTranscriptions([a, b])).toBe('first line\nsecond line\nthird line\nfourth line');
+	});
+
+	it('dedupes fuzzily when the model reads the seam slightly differently', () => {
+		const a = 'shopping list\n- two dozen eggs';
+		const b = '- two dozen egqs\n- oat milk';
+		expect(mergeBandTranscriptions([a, b])).toBe('shopping list\n- two dozen eggs\n- oat milk');
+	});
+
+	it('concatenates when there is no seam overlap', () => {
+		expect(mergeBandTranscriptions(['alpha', 'omega'])).toBe('alpha\nomega');
+	});
+
+	it('skips EMPTY and blank bands', () => {
+		expect(mergeBandTranscriptions(['EMPTY', 'real text', '   ', 'EMPTY.'])).toBe('real text');
+		expect(mergeBandTranscriptions(['EMPTY', 'EMPTY'])).toBe('');
 	});
 });
 
