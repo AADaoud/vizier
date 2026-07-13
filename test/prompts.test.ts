@@ -39,6 +39,11 @@ describe('Prompts', () => {
 		expect(p).not.toMatch(/draft/i);
 	});
 
+	it('handwritingTranscribe flags band slices only when asked', () => {
+		expect(Prompts.handwritingTranscribe(undefined, true)).toMatch(/slice of a taller page/i);
+		expect(Prompts.handwritingTranscribe()).not.toMatch(/slice/i);
+	});
+
 	it('handwritingTranscribe embeds the OCR hint as a cross-check', () => {
 		const p = Prompts.handwritingTranscribe('n0isy 0cr t3xt');
 		expect(p).toContain('n0isy 0cr t3xt');

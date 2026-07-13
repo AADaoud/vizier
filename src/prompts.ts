@@ -133,13 +133,16 @@ export const Prompts = {
 		`STUDY GUIDE:`,
 
 	// ── Handwriting: direct vision transcription (optional OCR-assist hint) ──
-	handwritingTranscribe: (ocrHint?: string) =>
+	handwritingTranscribe: (ocrHint?: string, band = false) =>
 		`You are a handwriting transcription system.\n\n` +
 		`Look at the attached image and transcribe ALL handwritten text exactly as written:\n` +
 		`- Preserve line breaks and structure (headings, lists, indentation).\n` +
 		`- Do NOT correct the writer's spelling, grammar, or wording.\n` +
 		`- Write [illegible] for a word you genuinely cannot read.\n` +
 		`- If the image contains no legible handwriting, reply with exactly: EMPTY\n` +
+		(band
+			? `- This image is a horizontal slice of a taller page; a line at the very top or bottom edge may be partially cut off — transcribe it as best you can.\n`
+			: '') +
 		(ocrHint
 			? `\nA conventional OCR engine produced this noisy draft of the same image. It often misreads handwriting — trust your own reading of the image and use the draft only to cross-check ambiguous words:\n${ocrHint}\n`
 			: '') +
