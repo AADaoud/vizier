@@ -479,6 +479,23 @@ export class AIAgentSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
+			.setName('Vision role models')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
+			.setDesc('Vision-capable model(s) for /handwriting image transcription. qwen2.5vl is markedly better at handwriting than general-purpose models.')
+			.addText(text => text
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+				.setPlaceholder('qwen2.5vl:7b, gemma3:4b')
+				.setValue((this.plugin.settings.roles.vision?.models ?? []).join(', '))
+				.onChange(async (value) => {
+					const models = value.split(',').map(m => m.trim()).filter(Boolean);
+					this.plugin.settings.roles.vision = {
+						...this.plugin.settings.roles.vision,
+						models: models.length ? models : [...DEFAULT_SETTINGS.roles.vision.models],
+					};
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
 			.setName('Embedding role models')
 			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Embedding model for vector operations (vault index, memory retrieval). Must support /api/embeddings.')

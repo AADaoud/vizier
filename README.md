@@ -164,6 +164,7 @@ Articles are fetched via [Jina AI Reader](https://jina.ai/reader/) (`r.jina.ai`)
 | AI notes folder | *(empty)* | Vault folder where `/write` saves notes (empty = vault root) |
 | Handwritten notes folder | `Handwritten Notes` | Vault folder where `/handwriting` saves notes |
 | Handwriting OCR assist | off | Also run a local EasyOCR engine as a second signal for `/handwriting` (heavy optional install) |
+| Vision role models | `qwen2.5vl:7b, gemma4:e4b, gemma3:4b` | Vision-capable model chain used by `/handwriting` |
 | People folder | `Human Network/People` | Vault folder where `/person` saves notes |
 | Events folder | `Human Network/Events` | Vault folder where `/event` saves notes |
 | Ideas folder | `Human Network/Ideas` | Vault folder where `/idea` saves notes |
