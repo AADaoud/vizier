@@ -16,6 +16,7 @@ function cfg(model: string): LLMCoreConfig {
 			utility:   { models: [model] },
 			research:  { models: [model] },
 			embedding: { models: ['all-minilm:l6-v2'] },
+			vision:    { models: [model] },
 		},
 		localContextWindow: 8192,
 	};

@@ -37,7 +37,7 @@ export interface LLMCoreConfig {
 
 export function buildLLMConfig(settings: AIAgentSettings): LLMCoreConfig {
 	// Backwards-compat: if roles field is missing from saved data, seed from defaultModel
-	const saved = settings.roles ?? { default: { models: [] }, utility: { models: [] }, research: { models: [] }, embedding: { models: [] } };
+	const saved = settings.roles ?? { default: { models: [] }, utility: { models: [] }, research: { models: [] }, embedding: { models: [] }, vision: { models: [] } };
 	const fallback = settings.defaultModel || 'gemma3:4b';
 	return {
 		ollamaUrl: settings.ollamaUrl,
@@ -46,6 +46,7 @@ export function buildLLMConfig(settings: AIAgentSettings): LLMCoreConfig {
 			utility:   { models: saved.utility?.models?.length   ? saved.utility.models   : [fallback], endpoint: saved.utility?.endpoint },
 			research:  { models: saved.research?.models?.length  ? saved.research.models  : [fallback], endpoint: saved.research?.endpoint },
 			embedding: { models: saved.embedding?.models?.length ? saved.embedding.models : ['nomic-embed-text'], endpoint: saved.embedding?.endpoint },
+			vision:    { models: saved.vision?.models?.length    ? saved.vision.models    : ['qwen2.5vl:7b', fallback], endpoint: saved.vision?.endpoint },
 		},
 		localContextWindow: settings.localContextWindow ?? 8192,
 	};
@@ -109,6 +110,7 @@ const KNOWN_WINDOWS: Record<string, number> = {
 	'gemma2:9b': 8192, 'gemma2:27b': 8192,
 	'qwen3:8b': 32768, 'qwen3:14b': 32768, 'qwen3:32b': 32768,
 	'qwen2.5:7b': 32768, 'qwen2.5:14b': 32768,
+	'qwen2.5vl:3b': 128000, 'qwen2.5vl:7b': 128000, 'qwen2.5vl:32b': 128000,
 	'llama3.2:3b': 131072, 'llama3.2:8b': 131072,
 	'llama3.1:8b': 131072, 'llama3.1:70b': 131072,
 	'mistral:7b': 32768, 'mistral-nemo': 128000,

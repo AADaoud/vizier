@@ -6,7 +6,7 @@ import { COMMAND_CATEGORIES, DEFAULT_COMMAND_MODULES, type ToggleableCategory } 
 
 // ── Role-based model routing ───────────────────────────────────────────────
 
-export type ModelRole = 'default' | 'utility' | 'research' | 'embedding';
+export type ModelRole = 'default' | 'utility' | 'research' | 'embedding' | 'vision';
 
 export interface RoleSettings {
 	/** Ordered fallback chain: first available/responsive model wins. */
@@ -69,6 +69,8 @@ export interface AIAgentSettings {
 		research: RoleSettings;
 		/** All vector operations — should be an embedding-specific model. */
 		embedding: RoleSettings;
+		/** Image transcription (/handwriting) — should be a vision-strong model. */
+		vision: RoleSettings;
 	};
 
 	// ── New: feature flags ────────────────────────────────────────────
@@ -117,6 +119,10 @@ export const DEFAULT_SETTINGS: AIAgentSettings = {
 		utility:   { models: ['gemma4:e2b', 'gemma3:4b'] },
 		research:  { models: ['gemma4:12b', 'gemma4:e4b'] },
 		embedding: { models: ['all-minilm:l6-v2', 'nomic-embed-text'] },
+		// qwen2.5vl is markedly stronger at handwriting than general-purpose
+		// models; the gemma fallbacks keep /handwriting working when it isn't
+		// installed.
+		vision:    { models: ['qwen2.5vl:7b', 'gemma4:e4b', 'gemma3:4b'] },
 	},
 
 	features: {
@@ -146,6 +152,7 @@ const LEGACY_ROLE_DEFAULTS: Record<ModelRole, string[]> = {
 	utility:   ['gemma3:4b'],
 	research:  ['gemma3:27b', 'gemma3:12b', 'gemma3:4b'],
 	embedding: ['nomic-embed-text', 'all-minilm'],
+	vision:    [], // role introduced after the gemma4 era — no legacy chain to migrate
 };
 
 export function migrateLegacyRoleDefaults(roles: AIAgentSettings['roles']): boolean {

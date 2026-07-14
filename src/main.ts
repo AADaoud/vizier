@@ -624,7 +624,7 @@ export default class VizierPlugin extends Plugin {
 		// Merge feature flags so newly added flags get their defaults
 		base.features = { ...DEFAULT_SETTINGS.features, ...(loaded?.features ?? {}) };
 		// Per-role: merge so existing models are preserved
-		for (const role of ['default', 'utility', 'research', 'embedding'] as const) {
+		for (const role of ['default', 'utility', 'research', 'embedding', 'vision'] as const) {
 			if (!base.roles[role]?.models?.length) {
 				base.roles[role] = DEFAULT_SETTINGS.roles[role];
 			}
