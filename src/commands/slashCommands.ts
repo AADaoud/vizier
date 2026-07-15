@@ -1,11 +1,11 @@
 import { App, TFile, requestUrl } from 'obsidian';
 import { callOllama, callOllamaStructured } from '../utils/ollama';
-import { callStructured, buildLLMConfig } from '../llm_core';
+import { callStructured, callStreamingCollect, buildLLMConfig } from '../llm_core';
 import { mapReduceSummarize } from '../utils/chunking';
 import { Prompts } from '../prompts';
 import { ClipLearnModal } from '../ui/ClipLearnModal';
 import { sanitizeFilename, sanitizeTag, buildYamlTags, today } from '../utils/noteBuilder';
-import { prepareImageForVision } from '../utils/image';
+import { prepareImageForVision, prepareImageBands, mergeBandTranscriptions } from '../utils/image';
 import { AIAgentSettings } from '../settings';
 import type { CommandCategory } from './categories';
 import { ensureVizierServer } from '../server_lifecycle';
@@ -1011,51 +1011,62 @@ export async function executeHandwriting(
 	imageFile: File,
 	app: App,
 	replaceMessage: ReplaceMessage,
-	model: string,
+	settings: AIAgentSettings,
 	config: CommandConfig,
-	notesFolder: string,
-	ocrAssist = false,
 ): Promise<void> {
-	// 1. Decode, downscale, and re-encode the image before it goes anywhere —
-	// vision models see at most ~1-2 MP, so a full-resolution phone photo only
-	// slows encoding, transfer, and inference.
+	const notesFolder = settings.handwritingFolder;
+	const ocrAssist = settings.features.ocrAssist ?? false;
+	const llm = buildLLMConfig(settings);
+
+	// 1. Decode and slice. Short images become one downscaled JPEG; tall pages
+	// become overlapping high-resolution bands so every line reaches the model
+	// readable instead of ~15 px tall.
 	replaceMessage('assistant', 'Preparing image…');
 	const buffer = await imageFile.arrayBuffer();
-	const prepared = await prepareImageForVision(buffer, imageFile.type);
+	const { bands, banded } = await prepareImageBands(buffer, imageFile.type);
 
-	// 2. Optional second signal: raw EasyOCR text from the local server.
+	// 2. Optional second signal: raw EasyOCR text over the whole page.
 	let ocrHint = '';
 	if (ocrAssist) {
 		replaceMessage('assistant', 'Running OCR assist…');
-		ocrHint = await fetchOcrHint(prepared.base64, config.serverUrl);
+		const wholePage = banded
+			? (await prepareImageForVision(buffer, imageFile.type)).base64
+			: bands[0] ?? '';
+		ocrHint = await fetchOcrHint(wholePage, config.serverUrl);
 	}
 
-	// 3. Primary path: the vision model transcribes the image directly.
-	replaceMessage('assistant', 'Transcribing handwriting…');
-	let transcriptionText = '';
+	// 3. Primary path: the vision-role model transcribes each band directly.
+	// The full-page OCR hint only accompanies single-band images — it doesn't
+	// line up with any one band of a sliced page.
+	const parts: string[] = [];
 	try {
-		transcriptionText = await callOllama({
-			ollamaUrl: config.ollamaUrl,
-			model,
-			messages: [{
+		for (let i = 0; i < bands.length; i++) {
+			replaceMessage('assistant', bands.length > 1
+				? `Transcribing handwriting (part ${i + 1}/${bands.length})…`
+				: 'Transcribing handwriting…');
+			const part = await callStreamingCollect(llm, 'vision', [{
 				role: 'user',
-				content: Prompts.handwritingTranscribe(ocrHint.trim() || undefined),
-				images: [prepared.base64],
-			}],
-		});
+				content: Prompts.handwritingTranscribe(banded ? undefined : ocrHint.trim() || undefined, banded),
+				images: [bands[i] ?? ''],
+			}], { temperature: 0 });
+			parts.push(part);
+		}
 	} catch (err) {
 		if (ocrHint.trim()) {
-			// Vision model unavailable — raw OCR text beats failing outright.
-			transcriptionText = ocrHint;
+			// No vision model responded — raw OCR text beats failing outright.
+			parts.length = 0;
+			parts.push(ocrHint);
 		} else {
 			const msg = err instanceof Error ? err.message : String(err);
+			const chain = llm.roles.vision.models.join(', ');
 			replaceMessage('assistant',
-				`Transcription failed: ${msg}\n\nMake sure the configured model (**${model}**) supports vision (e.g. gemma3:4b or larger, qwen2.5-vl), or enable **Handwriting OCR assist** in settings as a fallback.`);
+				`Transcription failed: ${msg}\n\nNone of the vision-role models (${chain}) could transcribe the image. Install one (\`ollama pull qwen2.5vl:7b\`) or set **Vision role models** in settings, or enable **Handwriting OCR assist** as a fallback.`);
 			return;
 		}
 	}
 
-	if (!transcriptionText.trim() || /^EMPTY\.?$/i.test(transcriptionText.trim())) {
+	let transcriptionText = mergeBandTranscriptions(parts);
+	if (!transcriptionText.trim()) {
 		replaceMessage('assistant', 'No legible handwriting found in the image. Check it is clear, well-lit, and contains handwriting.');
 		return;
 	}
