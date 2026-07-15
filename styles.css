@@ -1474,3 +1474,32 @@
 .theme-light .vizier-activity-bar {
 	background: var(--v-raised);
 }
+
+/* ── Handwriting review modal ───────────────────────── */
+
+.vizier-hw-review-modal {
+	width: min(1100px, 92vw);
+}
+
+.vizier-hw-review-body {
+	display: flex;
+	gap: 12px;
+	align-items: stretch;
+}
+
+.vizier-hw-review-image {
+	flex: 1 1 50%;
+	min-width: 0;
+	max-height: 60vh;
+	object-fit: contain;
+	border-radius: 6px;
+	background: var(--background-secondary);
+}
+
+.vizier-hw-review-text {
+	flex: 1 1 50%;
+	min-height: 300px;
+	max-height: 60vh;
+	resize: vertical;
+	font-family: var(--font-text);
+}
