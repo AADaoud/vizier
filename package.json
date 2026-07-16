@@ -1,6 +1,6 @@
 {
 	"name": "vizier",
-	"version": "0.7.6",
+	"version": "0.7.7",
 	"description": "Vizier — a local, privacy-first AI agent for Obsidian powered by Ollama.",
 	"main": "main.js",
 	"type": "module",
