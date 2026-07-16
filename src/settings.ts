@@ -480,7 +480,6 @@ export class AIAgentSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Vision role models')
-			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Vision-capable model(s) for /handwriting image transcription. qwen2.5vl is markedly better at handwriting than general-purpose models.')
 			.addText(text => text
 				// eslint-disable-next-line obsidianmd/ui/sentence-case

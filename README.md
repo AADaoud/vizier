@@ -127,7 +127,7 @@ Vizier routes work across four roles so you can match each task to an appropriat
 
 ### Handwriting transcription
 
-`/handwriting` sends the (downscaled) image straight to your configured vision-capable Ollama model (e.g. `gemma3:4b` or larger, `qwen2.5-vl`) — no server, no extra downloads.
+`/handwriting` transcribes a pasted image with the **vision role** model chain (default `qwen2.5vl:7b`, which is markedly stronger at handwriting than general-purpose models) — no server, no extra downloads. Tall pages are automatically sliced into overlapping high-resolution bands so each line stays readable to the model, and the per-band transcriptions are stitched back together. Before anything is saved you review the result side-by-side with the image — `[illegible]` marks the words the model wasn't sure about.
 
 **Optional OCR assist:** for tricky pages you can enable **Settings → Vizier → Handwriting OCR assist**, which additionally runs a local EasyOCR engine and feeds its raw output to the vision model as a cross-check. This requires the Vizier server (below) and a one-time ~1.5 GB install (PyTorch + models); the toggle offers the install when the server is running.
 

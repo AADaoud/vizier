@@ -4,6 +4,7 @@ import { callStructured, callStreamingCollect, buildLLMConfig } from '../llm_cor
 import { mapReduceSummarize } from '../utils/chunking';
 import { Prompts } from '../prompts';
 import { ClipLearnModal } from '../ui/ClipLearnModal';
+import { HandwritingReviewModal } from '../ui/HandwritingReviewModal';
 import { sanitizeFilename, sanitizeTag, buildYamlTags, today } from '../utils/noteBuilder';
 import { prepareImageForVision, prepareImageBands, mergeBandTranscriptions } from '../utils/image';
 import { AIAgentSettings } from '../settings';
@@ -1071,7 +1072,17 @@ export async function executeHandwriting(
 		return;
 	}
 
-	// 4. Save image to vault attachment folder
+	// 4. Human review before anything is written — the one stage that can
+	// guarantee correctness.
+	replaceMessage('assistant', 'Waiting for review…');
+	const reviewed = await HandwritingReviewModal.review(app, imageFile, transcriptionText);
+	if (reviewed === null || !reviewed.trim()) {
+		replaceMessage('assistant', 'Handwriting capture cancelled — nothing was saved.');
+		return;
+	}
+	transcriptionText = reviewed;
+
+	// 5. Save image to vault attachment folder
 	replaceMessage('assistant', 'Saving image…');
 	const attachmentFolder = getAttachmentFolder(app);
 	const timestamp = Date.now();
@@ -1089,7 +1100,7 @@ export async function executeHandwriting(
 		return;
 	}
 
-	// 5. Create note with embedded image and transcription callout
+	// 6. Create note with embedded image and transcription callout
 	replaceMessage('assistant', 'Creating note…');
 	const date = today();
 	const noteBaseName = `${date} - Handwritten Note`;
