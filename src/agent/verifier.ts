@@ -12,7 +12,8 @@
  *             to the research model (teacher escalation)
  *   BLOCKED — needs something only the user can provide; surfaced as-is
  *
- * The verifier sees the transcript, not the vault — it checks coherence of
+ * The verifier sees the transcript of the current turn (not earlier chat
+ * history), not the vault — it checks coherence of
  * the work against the request, not ground truth.
  */
 
@@ -25,6 +26,8 @@ export const EFFECTFUL_TOOLS = new Set([
 	'write_note', 'edit_note', 'create_entity', 'link_entities',
 	'add_claim', 'cite_claim', 'contest_claim', 'standardize_folder',
 ]);
+
+const TRANSCRIPT_CHARS = 7000;
 
 export function isEffectfulRun(toolsUsed: string[]): boolean {
 	return toolsUsed.some(t => EFFECTFUL_TOOLS.has(t));
@@ -51,7 +54,8 @@ export async function verifyRun(
 				`User request: ${userMessage.slice(0, 1000)}`,
 				'',
 				'Agent transcript:',
-				transcript.slice(0, 7000),
+				// Keep the end: the latest tool results are what confirm the work.
+				transcript.length > TRANSCRIPT_CHARS ? `[…]${transcript.slice(-TRANSCRIPT_CHARS)}` : transcript,
 			].join('\n'),
 		}],
 		{ num_predict: 400 }

@@ -210,6 +210,10 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	const abortRef = useRef<AbortController | null>(null);
 
 	const isLoading = commandLoading || streaming;
+	// Set synchronously on send. `isLoading` is read from a render closure, so
+	// two Enter presses in one frame would otherwise both pass the guard.
+	const sendingRef = useRef(false);
+	useEffect(() => { if (!isLoading) sendingRef.current = false; }, [isLoading]);
 	const isSplash  = messages.length === 0;
 
 	// ── Ollama model discovery ─────────────────────────────────────────
@@ -344,6 +348,9 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 		setStreaming(true);
 		setAgentStatus('Thinking…');
 		const myRun = ++runIdRef.current;
+		// A new run supersedes any run still in flight: stop it for real, so it
+		// cannot keep calling tools (and writing notes) behind this one.
+		abortRef.current?.abort();
 		abortRef.current = new AbortController();
 		const signal = abortRef.current.signal;
 
@@ -540,9 +547,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	}, [model, settings.ollamaUrl]);
 
 	// ── Send handler ───────────────────────────────────────────────────
-	const handleSend = useCallback(async () => {
-		const text = input.trim();
-		if (!text || isLoading) return;
+	const dispatchInput = useCallback(async (text: string) => {
 		setInput('');
 		if (textareaRef.current) textareaRef.current.setCssStyles({ height: 'auto' });
 
@@ -604,7 +609,14 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 		} else {
 			await sendToOllama(messages, text);
 		}
-	}, [input, isLoading, messages, app, model, settings, memoryManager, addMessage, addFindResults, replaceLastMessage, sendToAgent, sendToOllama]);
+	}, [messages, app, model, settings, memoryManager, addMessage, addFindResults, replaceLastMessage, sendToAgent, sendToOllama]);
+
+	const handleSend = useCallback(async () => {
+		const text = input.trim();
+		if (!text || isLoading || sendingRef.current) return;
+		sendingRef.current = true;
+		try { await dispatchInput(text); } finally { sendingRef.current = false; }
+	}, [input, isLoading, dispatchInput]);
 
 	const selectCommand = (cmd: SlashCommand) => {
 		setInput(cmd.template);

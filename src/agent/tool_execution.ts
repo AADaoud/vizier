@@ -45,7 +45,6 @@ import {
 import {
 	sanitizeFilename,
 	ensureFolder,
-	deduplicatePath,
 } from '../utils/noteBuilder';
 import type { VaultIndex } from '../memory/vault_index';
 import type { MemoryManager } from '../memory/memory_manager';
@@ -271,13 +270,18 @@ async function handleWriteNote(
 
 	try {
 		await ensureFolder(app, folder);
-		const base = folder ? `${folder}/${sanitizeFilename(filename)}` : sanitizeFilename(filename);
-		const path = await deduplicatePath(app, base);
-		await app.vault.create(path, content);
+		const name = sanitizeFilename(filename.replace(/\.md$/i, ''));
+		const path = `${folder ? `${folder}/` : ''}${name}.md`;
 		const displayName = path.replace(/^.*\//, '').replace(/\.md$/, '');
+		// Never write a second copy (`Plan-2.md`) of a note that already exists:
+		// a repeat is almost always the model retrying, not the user asking twice.
+		if (app.vault.getAbstractFileByPath(path)) {
+			return `ERROR: A note already exists at \`${path}\` ([[${displayName}]]). Nothing was written. Use edit_note to change it, or choose a different filename.`;
+		}
+		await app.vault.create(path, content);
 		return `Created [[${displayName}]] at \`${path}\`.`;
 	} catch (err) {
-		return `Failed to create note: ${err instanceof Error ? err.message : String(err)}`;
+		return `ERROR: Failed to create note: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 

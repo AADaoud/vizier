@@ -98,6 +98,7 @@ Returns the active note's name and content; if nothing is open it says so.`,
 For content >15 lines, always use this — never put that much in chat.
 Choose folder deliberately: put the note where similar notes live (see the folder map in VAULT STATE). Omit folder only to use the default.
 Include YAML frontmatter with type, created, and tags fields.
+Fails if a note with that filename already exists in the folder — use edit_note to change an existing note.
 Returns the created [[wikilink]] to emit in your response.`,
 	},
 

@@ -39,9 +39,10 @@ import {
 import {
 	executeTool,
 	validateParams,
+	type ToolResult,
 } from './tool_execution';
 import { loadSkills, selectSkills, formatSkillsBlock, distillSkill } from '../skills/skills';
-import { verifyRun, isEffectfulRun } from './verifier';
+import { verifyRun, isEffectfulRun, EFFECTFUL_TOOLS } from './verifier';
 import { beginActivity, endActivity } from '../ui/activity';
 import {
 	ToolCallListSchema,
@@ -258,6 +259,30 @@ export async function runAgentLoop(
 	];
 
 	const lastToolKeys = new Set<string>(); // loop-breaker state
+
+	// Vault-changing calls that already succeeded in this run, by tool + params.
+	// A model that repeats one (same round, a later round, or the verifier's
+	// corrective round) gets the earlier result back instead of a second write.
+	const effectsDone = new Map<string, string>();
+	const runTool = async (call: ToolCallList['calls'][number]): Promise<ToolResult> => {
+		const effectful = EFFECTFUL_TOOLS.has(call.name);
+		const key = toolCallKey(call.name, call.params);
+		const earlier = effectful ? effectsDone.get(key) : undefined;
+		if (earlier !== undefined) {
+			dbg.log(`Tool skipped (repeat): ${call.name}`, { params: call.params });
+			return {
+				ok: true,
+				output: `Skipped: this exact ${call.name} call already ran in this request and was not repeated. Its result was:\n${earlier}`,
+				duration_ms: 0,
+			};
+		}
+		const result = await executeTool(call, app, settings, { readNoteChars });
+		if (effectful && result.ok) effectsDone.set(key, result.output);
+		return result;
+	};
+
+	// What happened in this turn only (no chat history): the verifier's input.
+	const turnLog: string[] = [`user: ${userMessage}`];
 	// Second loop-breaker: consecutive failures per tool NAME. The identical-
 	// params breaker misses the common failure loop where the model retries a
 	// broken tool with slightly different params each round (e.g. create_entity
@@ -356,7 +381,7 @@ export async function runAgentLoop(
 				if (aborted()) return;
 				onEvent({ type: 'tool_start', name: call.name, params: call.params });
 
-				const result = await executeTool(call, app, settings, { readNoteChars });
+				const result = await runTool(call);
 
 				dbg.log(`Tool ${result.ok ? 'ok' : 'error'}: ${call.name} (${result.duration_ms}ms)`, {
 					params: call.params,
@@ -390,10 +415,9 @@ export async function runAgentLoop(
 			}
 
 			if (toolResultLines.length > 0) {
-				messages.push({
-					role: 'user',
-					content: toolResultLines.join('\n\n---\n\n'),
-				});
+				const content = toolResultLines.join('\n\n---\n\n');
+				messages.push({ role: 'user', content });
+				turnLog.push(`tool results: ${content}`);
 			}
 
 			// ── Done? ──────────────────────────────────────────────────
@@ -416,6 +440,7 @@ export async function runAgentLoop(
 			token => { finalText += token; onEvent({ type: 'token', content: token }); }
 		);
 		dbg.log('Final response', finalText);
+		turnLog.push(`assistant: ${finalText}`);
 
 		invalidateVaultCache(); // vault may have changed if notes were written
 
@@ -428,7 +453,7 @@ export async function runAgentLoop(
 		if (isEffectfulRun(toolsUsed) && !aborted()) {
 			beginActivity('verify', 'Verifying the work');
 			try {
-				const verdict = await verifyRun(cfg, userMessage, transcript());
+				const verdict = await verifyRun(cfg, userMessage, turnLog.join('\n\n'));
 				verifierResult = verdict.result;
 				dbg.log('Verifier verdict', verdict);
 				endActivity('verify', verdict.result !== 'BLOCKED',
@@ -436,7 +461,7 @@ export async function runAgentLoop(
 						: verdict.result === 'RETRY' ? 'Issues found — correcting'
 						: 'Verifier: blocked');
 
-				if (verdict.result === 'RETRY' && verdict.issues.length > 0) {
+				if (verdict.result === 'RETRY' && verdict.issues.length > 0 && !aborted()) {
 					messages.push({
 						role: 'user',
 						content: `[VERIFIER] The work has unresolved issues:\n${verdict.issues.map(i => `- ${i}`).join('\n')}\nFix them now with the necessary tool calls. Do not apologise — just fix.`,
@@ -452,15 +477,16 @@ export async function runAgentLoop(
 
 					const fixResults: string[] = [];
 					for (const call of fix.calls.slice(0, 5)) {
+						if (aborted()) return; // Stop also halts the correction
 						if (validateParams(call)) continue;
 						onEvent({ type: 'tool_start', name: call.name, params: call.params });
-						const r = await executeTool(call, app, settings, { readNoteChars });
+						const r = await runTool(call);
 						onEvent({ type: 'tool_result', name: call.name, preview: r.output.slice(0, 120).replace(/\n/g, ' '), output: r.output.slice(0, 4000), ok: r.ok, duration_ms: r.duration_ms });
 						if (!toolsUsed.includes(call.name)) toolsUsed.push(call.name);
 						fixResults.push(`TOOL ${call.name} ${r.ok ? 'SUCCESS' : 'ERROR'}:\n${r.output.slice(0, toolResultChars)}`);
 					}
 
-					if (fixResults.length > 0) {
+					if (fixResults.length > 0 && !aborted()) {
 						messages.push({ role: 'user', content: fixResults.join('\n\n---\n\n') + '\n\nBriefly tell the user what was corrected.' });
 						onEvent({ type: 'token', content: '\n\n' });
 						await callStreaming(cfg, 'default', messages, { temperature: 0.7 },
