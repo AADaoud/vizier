@@ -74,8 +74,8 @@ export default class VizierPlugin extends Plugin {
 			// Incremental vault re-index in the background — deferred well after
 			// launch so it doesn't compete with Obsidian startup, Ollama warm-up,
 			// and capability probing (that contention both slowed launch and made
-			// the first embeddings fail). Steady-state runs are cheap: unchanged
-			// chunks are skipped via text_hash, so no embeddings are issued.
+			// the first embeddings fail). Steady-state runs are cheap: chunks
+			// whose text and embedding model are unchanged issue no embeddings.
 			const REINDEX_STARTUP_DELAY = 20_000;
 			this.app.workspace.onLayoutReady(() => {
 				const startReindex = () => {
@@ -110,7 +110,7 @@ export default class VizierPlugin extends Plugin {
 				this.app.vault.on('modify', (file) => {
 					if (file instanceof TFile && file.extension === 'md') {
 						invalidateVaultCache();
-						void this.vaultIndex?.indexFile(file, this.app, this.settings);
+						this.vaultIndex?.scheduleIndexFile(file, this.app, this.settings);
 					}
 				})
 			);
@@ -118,7 +118,7 @@ export default class VizierPlugin extends Plugin {
 				this.app.vault.on('create', (file) => {
 					if (file instanceof TFile && file.extension === 'md') {
 						invalidateVaultCache();
-						void this.vaultIndex?.indexFile(file, this.app, this.settings);
+						this.vaultIndex?.scheduleIndexFile(file, this.app, this.settings);
 					}
 				})
 			);
@@ -135,7 +135,7 @@ export default class VizierPlugin extends Plugin {
 					if (file instanceof TFile && file.extension === 'md') {
 						invalidateVaultCache();
 						void this.vaultIndex?.removeFile(oldPath);
-						void this.vaultIndex?.indexFile(file, this.app, this.settings);
+						this.vaultIndex?.scheduleIndexFile(file, this.app, this.settings);
 					}
 				})
 			);
@@ -590,6 +590,7 @@ export default class VizierPlugin extends Plugin {
 	}
 
 	onunload() {
+		void this.vaultIndex?.flush();
 		this.serverManager.stopServer();
 	}
 
