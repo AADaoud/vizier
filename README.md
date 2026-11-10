@@ -142,7 +142,7 @@ These features require a small local Python server (`vizier_server.py`) that run
 ```bash
 cd <vault>/.obsidian/plugins/vizier
 python3 -m venv .venv
-.venv/bin/pip install youtube-transcript-api wikipedia-api
+.venv/bin/pip install -U youtube-transcript-api "wikipedia-api>=0.12"
 .venv/bin/python3 vizier_server.py
 ```
 
