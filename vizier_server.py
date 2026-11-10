@@ -2,17 +2,25 @@
 """
 Vizier server — YouTube transcripts, Wikipedia lookup, and optional OCR assist.
 
-Install: pip install youtube-transcript-api wikipedia-api
+Install: pip install youtube-transcript-api "wikipedia-api>=0.12"
 Optional (OCR assist only): pip install easyocr pillow
-Run:     python3 vizier_server.py
+Run:     python3 vizier_server.py [--port 11435]
 """
 
+import argparse
 import base64
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-PORT = 11435
+DEFAULT_PORT = 11435
+
+# The only browser origin allowed to call this server. The plugin itself calls
+# it from Obsidian; any other web page open on this machine is refused.
+ALLOWED_ORIGIN = 'app://obsidian.md'
+
+# Largest request body accepted (an OCR image, base64-encoded).
+MAX_BODY_BYTES = 32 * 1024 * 1024
 
 _ocr_reader = None
 
@@ -29,12 +37,38 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:
         pass  # silence default access logs
 
+    def _origin_allowed(self) -> bool:
+        """Requests with no Origin header (the plugin, curl) or the Obsidian origin pass."""
+        origin = self.headers.get('Origin')
+        if origin is None or origin == ALLOWED_ORIGIN:
+            return True
+        self._reply(403, {'error': 'origin not allowed'})
+        return False
+
+    def _read_body(self):
+        """Return the request body, or None after replying when it is missing or too large."""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except ValueError:
+            length = -1
+        if length < 0:
+            self._reply(400, {'error': 'invalid Content-Length'})
+            return None
+        if length > MAX_BODY_BYTES:
+            self._reply(413, {'error': 'request body too large'})
+            return None
+        return self.rfile.read(length)
+
     def do_OPTIONS(self) -> None:
+        if not self._origin_allowed():
+            return
         self.send_response(204)
         self._cors_headers()
         self.end_headers()
 
     def do_GET(self) -> None:
+        if not self._origin_allowed():
+            return
         parsed = urlparse(self.path)
         if parsed.path == '/transcript':
             self._handle_transcript(parsed)
@@ -50,6 +84,8 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(404, {'error': 'not found'})
 
     def do_POST(self) -> None:
+        if not self._origin_allowed():
+            return
         path_part = urlparse(self.path).path
         if path_part == '/ocr':
             self._handle_ocr()
@@ -75,8 +111,9 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(500, {'error': str(e)})
 
     def _handle_ocr(self) -> None:
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length)
+        body = self._read_body()
+        if body is None:
+            return
         try:
             data = json.loads(body)
         except Exception:
@@ -198,7 +235,8 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(202, {'status': 'downloading'})
 
     def _cors_headers(self) -> None:
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
+        self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
@@ -213,8 +251,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    server = HTTPServer(('127.0.0.1', PORT), Handler)
-    print(f'Vizier server running on http://127.0.0.1:{PORT}', flush=True)
+    parser = argparse.ArgumentParser(description='Vizier local server')
+    parser.add_argument('--port', type=int, default=DEFAULT_PORT)
+    port = parser.parse_args().port
+    # Threaded, so a slow page fetch or OCR run does not block /health.
+    server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    server.daemon_threads = True
+    print(f'Vizier server running on http://127.0.0.1:{port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

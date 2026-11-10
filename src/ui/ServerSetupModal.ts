@@ -3,7 +3,7 @@ import { type ChildProcess, spawn, type SpawnOptions } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../utils/logger';
-import type { EnsureServerResult } from '../server_lifecycle';
+import { serverPort, type EnsureServerResult } from '../server_lifecycle';
 
 const _proc = (globalThis as Record<string, unknown>)['process'] as { env: Record<string, string>; platform?: string } | undefined;
 const IS_WINDOWS = _proc?.platform === 'win32';
@@ -35,6 +35,9 @@ function venvPython(pluginDir: string): string {
 		? path.join(pluginDir, '.venv', 'Scripts', 'python.exe')
 		: path.join(pluginDir, '.venv', 'bin', 'python3');
 }
+
+// The server's Wikipedia search needs wikipedia-api 0.12 or newer.
+const WIKIPEDIA_API_REQUIREMENT = 'wikipedia-api>=0.12';
 
 /** Returns the venv pip executable path, platform-aware. */
 function venvPip(pluginDir: string): string {
@@ -102,10 +105,12 @@ export class TranscriptServerManager {
 	}
 
 	/** Start the server using a venv inside the plugin directory. */
-	startServer(): Promise<void> {
+	startServer(serverUrl: string): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const script = path.join(this.pluginDir, 'vizier_server.py');
-			this.process = spawnProc(venvPython(this.pluginDir), [script], {
+			// The server listens where the "Vizier server URL" setting points.
+			const port = String(serverPort(serverUrl));
+			this.process = spawnProc(venvPython(this.pluginDir), [script, '--port', port], {
 				cwd: this.pluginDir,
 			});
 
@@ -156,7 +161,7 @@ export class TranscriptServerManager {
 			if (await this.isServerReachable(serverUrl)) return 'ok';
 			if (!this.isSetupDone) return 'no-setup';
 			try {
-				await this.startServer();
+				await this.startServer(serverUrl);
 			} catch {
 				return 'offline';
 			}
@@ -262,7 +267,7 @@ export class ServerSetupModal extends Modal {
 				}
 
 				log('Installing core dependencies (youtube-transcript-api, wikipedia-api)…');
-				const pipOk = await runCmd(pip, ['install', 'youtube-transcript-api', 'wikipedia-api'], pluginDir, log);
+				const pipOk = await runCmd(pip, ['install', '-U', 'youtube-transcript-api', WIKIPEDIA_API_REQUIREMENT], pluginDir, log);
 				if (!pipOk) {
 					log('❌ Dependency installation failed. Check the log above.');
 					startBtn.disabled = false;
@@ -270,9 +275,10 @@ export class ServerSetupModal extends Modal {
 					return;
 				}
 			} else {
-				// Venv exists — ensure wikipedia-api is present (may be missing on older installs)
+				// Venv exists — ensure wikipedia-api is present and recent enough
+				// (older installs may lack it, or have a version without search).
 				log('Checking for wikipedia-api…');
-				const wikiOk = await runCmd(pip, ['install', 'wikipedia-api'], pluginDir, log);
+				const wikiOk = await runCmd(pip, ['install', '-U', WIKIPEDIA_API_REQUIREMENT], pluginDir, log);
 				if (!wikiOk) {
 					log('⚠ Could not install wikipedia-api — Wikipedia features will be unavailable.');
 				}
@@ -290,7 +296,7 @@ export class ServerSetupModal extends Modal {
 
 			log('Starting server…');
 			try {
-				await this.manager.startServer();
+				await this.manager.startServer(this.serverUrl);
 				log('Server started.');
 				new Notice('Vizier server started.');
 				this.onStarted();

@@ -10,14 +10,18 @@
  * Architecture:
  *   - Chunk notes by heading (H2/H3 sections), fall back to ~400-char windows
  *   - Embed each chunk via Ollama's embedding API (embedding role)
- *   - Persist index as {path, chunk_id, text_hash, vector, text} in vault_index.json
- *   - Incremental update on Obsidian vault modify/create/delete events (hash-deduped)
+ *   - Persist index as {path, chunk_id, text_hash, model, vector, text} in vault_index.json
+ *   - Incremental update on Obsidian vault modify/create/delete events: each
+ *     file is re-indexed as a whole, one run at a time per path. Chunks whose
+ *     full-text hash and embedding model are unchanged are reused; the rest are
+ *     re-embedded, and chunks no longer in the note are dropped.
  *   - BM25 scores are computed at query time (no pre-built inverted index needed at this scale)
  *
  * The index lives in the plugin directory, not the vault, so it won't appear
  * as a note in the user's workspace.
  */
 
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -28,7 +32,16 @@ import { recordRun } from '../traces';
 
 // Stop a reindex after this many consecutive chunk-embedding failures — the
 // embedding host is effectively down, so further attempts only waste time.
+// Only embedding errors count: a file that cannot be read says nothing about
+// the embedding host.
 const ABORT_AFTER_CONSECUTIVE_FAILURES = 12;
+
+// Notes whose body is shorter than this are not indexed.
+const MIN_BODY_CHARS = 100;
+
+// Editor autosaves fire `modify` every couple of seconds while typing. Wait for
+// a pause before re-indexing so one editing burst costs one pass.
+const INDEX_DEBOUNCE_MS = 2000;
 
 // During a full reindex, flush to disk every N files instead of after every
 // file. Writing the whole index per-file is O(n²) IO and blocks the UI; a
@@ -48,7 +61,9 @@ export interface IndexChunk {
 	path: string;       // vault file path
 	basename: string;
 	chunk_id: string;   // `${path}#${chunkIndex}`
-	text_hash: string;  // sha-ish: first 12 chars of btoa(text)
+	text_hash: string;  // textHash(text): covers the whole chunk, any Unicode
+	/** Embedding model that produced `vector`. Absent on chunks written before 0.7.8. */
+	model?: string;
 	text: string;
 	vector: number[];
 	indexed_at: number; // unix ms
@@ -84,9 +99,9 @@ function tokenize(text: string): string[] {
 		.filter(w => w.length >= 2 && !STOP_WORDS.has(w));
 }
 
-function textHash(text: string): string {
-	// Simple non-cryptographic hash — just for dedup checks
-	return btoa(text.slice(0, 64)).slice(0, 12);
+/** Change-detection hash over the full chunk text. Accepts any Unicode. */
+export function textHash(text: string): string {
+	return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 32);
 }
 
 interface BM25Corpus {
@@ -95,25 +110,42 @@ interface BM25Corpus {
 	avgDocLen: number;
 }
 
+interface DocTerms {
+	tf: Map<string, number>;    // term frequency within the chunk
+	len: number;                // token count
+}
+
+// Tokenising a chunk is the expensive part of BM25, and a chunk's text never
+// changes once created (an edit makes a new chunk object), so cache per chunk.
+const docTermsCache = new WeakMap<IndexChunk, DocTerms>();
+
+function docTerms(chunk: IndexChunk): DocTerms {
+	let d = docTermsCache.get(chunk);
+	if (!d) {
+		const tokens = tokenize(chunk.text);
+		const tf = new Map<string, number>();
+		for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+		d = { tf, len: tokens.length };
+		docTermsCache.set(chunk, d);
+	}
+	return d;
+}
+
 function buildBM25Corpus(chunks: IndexChunk[]): BM25Corpus {
 	const df = new Map<string, number>();
 	let totalLen = 0;
 
 	for (const chunk of chunks) {
-		const terms = new Set(tokenize(chunk.text));
-		totalLen += terms.size;
-		for (const t of terms) df.set(t, (df.get(t) ?? 0) + 1);
+		const { tf } = docTerms(chunk);
+		totalLen += tf.size;
+		for (const t of tf.keys()) df.set(t, (df.get(t) ?? 0) + 1);
 	}
 
 	return { df, docCount: chunks.length, avgDocLen: chunks.length ? totalLen / chunks.length : 1 };
 }
 
-function bm25Score(query: string, docText: string, corpus: BM25Corpus, k1 = 1.5, b = 0.75): number {
-	const queryTerms = tokenize(query);
-	const docTokens  = tokenize(docText);
-	const docLen     = docTokens.length;
-	const tf = new Map<string, number>();
-	for (const t of docTokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+function bm25Score(queryTerms: string[], chunk: IndexChunk, corpus: BM25Corpus, k1 = 1.5, b = 0.75): number {
+	const { tf, len: docLen } = docTerms(chunk);
 
 	let score = 0;
 	for (const qt of queryTerms) {
@@ -158,6 +190,14 @@ export class VaultIndex {
 	/** chunk_id → chunk, for O(1) lookups during (re)indexing. */
 	private byId = new Map<string, IndexChunk>();
 	private dirty = false;
+	/** Cached BM25 corpus statistics; cleared whenever chunks change. */
+	private corpus: BM25Corpus | null = null;
+	/** Tail of the indexing work queued per path, so one file is never indexed twice at once. */
+	private queues = new Map<string, Promise<unknown>>();
+	/** Pending debounced re-index timers, per path. */
+	private timers = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Model name reported by the most recent successful embedding. */
+	private currentModel: string | null = null;
 	/** Resolves once the on-disk index has finished loading. */
 	private readonly ready: Promise<void>;
 
@@ -171,10 +211,25 @@ export class VaultIndex {
 	// ── Persistence ──────────────────────────────────────────────────
 
 	private async load(): Promise<void> {
+		let raw: string | null = null;
 		try {
-			const raw = await fs.promises.readFile(this.storePath, 'utf-8');
-			this.chunks = JSON.parse(raw) as IndexChunk[];
-		} catch { this.chunks = []; } // missing file or parse error → start empty
+			raw = await fs.promises.readFile(this.storePath, 'utf-8');
+		} catch { /* missing file → start empty */ }
+
+		this.chunks = [];
+		if (raw !== null) {
+			try {
+				const parsed: unknown = JSON.parse(raw);
+				if (!Array.isArray(parsed)) throw new Error('index is not an array');
+				this.chunks = parsed as IndexChunk[];
+			} catch (err) {
+				// Keep the unreadable file aside rather than letting the next
+				// save overwrite it; the index rebuilds from the vault.
+				const aside = `${this.storePath}.corrupt-${Date.now()}`;
+				console.warn(`[Vizier] vault index unreadable, keeping it as ${path.basename(aside)}:`, err);
+				try { await fs.promises.rename(this.storePath, aside); } catch { /* best-effort */ }
+			}
+		}
 		this.byId = new Map(this.chunks.map(c => [c.chunk_id, c]));
 	}
 
@@ -194,40 +249,113 @@ export class VaultIndex {
 				this.savePending = false;
 				const data = JSON.stringify(this.chunks); // synchronous snapshot
 				this.dirty = false;
-				await fs.promises.writeFile(this.storePath, data, 'utf-8');
+				// Write to a temp file, then rename: a crash mid-write leaves
+				// the previous index intact instead of truncated JSON.
+				const tmp = `${this.storePath}.tmp`;
+				await fs.promises.writeFile(tmp, data, 'utf-8');
+				await fs.promises.rename(tmp, this.storePath);
 			} while (this.savePending);
-		} catch { /* best-effort */ } finally {
+		} catch (err) {
+			this.dirty = true; // nothing reached disk; retry on the next save
+			console.warn('[Vizier] vault index save failed:', err);
+		} finally {
 			this.saving = false;
 		}
 	}
 
 	// ── Index management ─────────────────────────────────────────────
 
+	/** Run `task` after any work already queued for `filePath` has finished. */
+	private enqueue<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+		const prev = this.queues.get(filePath) ?? Promise.resolve();
+		const run  = prev.then(task, task);
+		const tail = run.catch(() => undefined);
+		this.queues.set(filePath, tail);
+		void tail.then(() => { if (this.queues.get(filePath) === tail) this.queues.delete(filePath); });
+		return run;
+	}
+
+	/** Replace every chunk of `filePath` with `next` (empty = remove the file). */
+	private replaceFileChunks(filePath: string, next: IndexChunk[]): void {
+		this.chunks = this.chunks.filter(c => {
+			if (c.path !== filePath) return true;
+			this.byId.delete(c.chunk_id);
+			return false;
+		});
+		for (const c of next) {
+			this.chunks.push(c);
+			this.byId.set(c.chunk_id, c);
+		}
+		this.dirty = true;
+		this.corpus = null;
+	}
+
+	private cancelScheduled(filePath: string): void {
+		const t = this.timers.get(filePath);
+		if (t !== undefined) { clearTimeout(t); this.timers.delete(filePath); }
+	}
+
 	/** Remove all chunks for a given file path. */
 	async removeFile(filePath: string): Promise<void> {
+		this.cancelScheduled(filePath);
 		await this.ready;
-		const before = this.chunks.length;
-		this.chunks = this.chunks.filter(c => {
-			if (c.path === filePath) { this.byId.delete(c.chunk_id); return false; }
-			return true;
+		await this.enqueue(filePath, async () => {
+			if (!this.chunks.some(c => c.path === filePath)) return;
+			this.replaceFileChunks(filePath, []);
+			await this.save();
 		});
-		if (this.chunks.length !== before) this.dirty = true;
 	}
 
 	/**
-	 * Index or re-index a single file. Skips chunks whose text_hash hasn't changed.
+	 * Re-index a file once edits to it have paused. Use for vault events, which
+	 * fire on every autosave; `indexFile` runs immediately.
+	 */
+	scheduleIndexFile(file: TFile, app: App, settings: AIAgentSettings, delayMs = INDEX_DEBOUNCE_MS): void {
+		this.cancelScheduled(file.path);
+		this.timers.set(file.path, setTimeout(() => {
+			this.timers.delete(file.path);
+			this.indexFile(file, app, settings).catch((err: unknown) => {
+				console.warn(`[Vizier] indexing ${file.path} failed:`, err);
+			});
+		}, delayMs));
+	}
+
+	/** Cancel pending debounced work and flush unsaved changes (plugin unload). */
+	async flush(): Promise<void> {
+		for (const t of this.timers.values()) clearTimeout(t);
+		this.timers.clear();
+		await this.ready;
+		if (this.dirty) await this.save();
+	}
+
+	/**
+	 * Index or re-index a single file. Calls for the same path run one at a
+	 * time. Chunks whose full text and embedding model are unchanged are reused
+	 * without an embedding call; chunks no longer in the note are dropped.
 	 * Pass defer=true during a batch reindex to skip the per-file disk write (the
 	 * caller flushes periodically) — avoids rewriting the whole index per file.
 	 */
 	async indexFile(file: TFile, app: App, settings: AIAgentSettings, defer = false): Promise<{ added: number; failed: number }> {
 		await this.ready;
+		return this.enqueue(file.path, () => this.indexFileNow(file, app, settings, defer));
+	}
+
+	private async indexFileNow(file: TFile, app: App, settings: AIAgentSettings, defer: boolean): Promise<{ added: number; failed: number }> {
 		const content = await app.vault.cachedRead(file);
 		// Strip YAML frontmatter from indexing (the metadata is in frontmatter cache)
 		const body = content.replace(/^---[\s\S]*?---\n/, '').trim();
-		if (body.length < 100) return { added: 0, failed: 0 }; // too short to index
+		const rawChunks = body.length < MIN_BODY_CHARS ? [] : chunkByHeadings(body);
 
-		const rawChunks = chunkByHeadings(body);
-		const cfg       = buildLLMConfig(settings);
+		const old = this.chunks.filter(c => c.path === file.path);
+		// Reuse by content, not position: inserting a section must not re-embed
+		// everything after it. Identical chunks in one note share a vector.
+		const reusable = new Map<string, IndexChunk>();
+		for (const c of old) {
+			if (this.currentModel === null || c.model === this.currentModel) reusable.set(c.text_hash, c);
+		}
+
+		const cfg  = buildLLMConfig(settings);
+		const next: IndexChunk[] = [];
 		let added = 0;
 		let failed = 0;
 
@@ -236,35 +364,41 @@ export class VaultIndex {
 			const hash = textHash(text);
 			const id   = `${file.path}#${i}`;
 
-			// Skip if unchanged
-			const existing = this.byId.get(id);
-			if (existing?.text_hash === hash) continue;
+			const kept = reusable.get(hash);
+			if (kept) {
+				next.push({ ...kept, basename: file.basename, chunk_id: id });
+				continue;
+			}
 
 			try {
-				const { vector } = await getEmbedding(cfg, text);
+				const { vector, model } = await getEmbedding(cfg, text);
+				this.currentModel = model;
 				const chunk: IndexChunk = {
 					path: file.path,
 					basename: file.basename,
 					chunk_id: id,
 					text_hash: hash,
+					model,
 					text,
 					vector: roundVector(vector),
 					indexed_at: Date.now(),
 				};
-
-				if (existing) {
-					Object.assign(existing, chunk);
-				} else {
-					this.chunks.push(chunk);
-					this.byId.set(id, chunk);
-				}
-				this.dirty = true;
+				reusable.set(hash, chunk);
+				next.push(chunk);
 				added++;
 			} catch (err) {
 				failed++;
 				if (failed === 1) console.warn('[Vizier] chunk embedding failed:', err);
+				// Keep what was at this position searchable until the embedding
+				// succeeds; its stale hash makes the next pass retry it.
+				const stale = old.find(c => c.chunk_id === id);
+				if (stale) next.push(stale);
 			}
 		}
+
+		const unchanged = added === 0 && next.length === old.length
+			&& next.every((c, i) => c.chunk_id === old[i]?.chunk_id && c.text_hash === old[i]?.text_hash);
+		if (!unchanged) this.replaceFileChunks(file.path, next);
 
 		if (!defer && this.dirty) await this.save();
 		return { added, failed };
@@ -279,7 +413,9 @@ export class VaultIndex {
 
 		// Pre-flight: fail loudly (not per-chunk-silently) if embeddings are down
 		try {
-			await getEmbedding(cfg, 'vizier embedding pre-flight test');
+			// Also learns the current embedding model, so chunks embedded by a
+			// different model are re-embedded below.
+			this.currentModel = (await getEmbedding(cfg, 'vizier embedding pre-flight test')).model;
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			recordRun({ kind: 'vault_index', duration_ms: Date.now() - start, ok: false, error: msg });
@@ -303,7 +439,11 @@ export class VaultIndex {
 				embedFailures += r.failed;
 				if (r.added > 0)      consecutiveFailures = 0;
 				else if (r.failed > 0) consecutiveFailures += r.failed;
-			} catch { embedFailures++; consecutiveFailures++; }
+			} catch (err) {
+				// Not an embedding failure (e.g. the file could not be read):
+				// skip the file without tripping the circuit-breaker.
+				console.warn(`[Vizier] could not index ${file.path}:`, err);
+			}
 
 			// Periodic flush so progress survives a crash without per-file IO.
 			if (this.dirty && (i + 1) % SAVE_EVERY_FILES === 0) {
@@ -342,30 +482,27 @@ export class VaultIndex {
 		await this.ready;
 		if (this.chunks.length === 0) return [];
 
-		const cfg    = buildLLMConfig(settings);
-		const corpus = buildBM25Corpus(this.chunks);
+		const cfg = buildLLMConfig(settings);
+
+		// BM25 once per chunk, with the corpus statistics cached between queries.
+		const queryTerms = tokenize(query);
+		const corpus     = this.bm25Corpus();
+		const rawBM25    = this.chunks.map(c => bm25Score(queryTerms, c, corpus));
+		const maxBM25    = rawBM25.reduce((m, x) => (x > m ? x : m), 0) || 1;
 
 		// Get query embedding
-		let queryVector: number[];
+		let queryVector: number[] | null = null;
 		try {
-			const { vector } = await getEmbedding(cfg, query);
-			queryVector = vector;
-		} catch {
-			// Embedding failed — fall back to BM25-only
-			return this.bm25OnlySearch(query, corpus, k, threshold);
-		}
+			queryVector = (await getEmbedding(cfg, query)).vector;
+		} catch { /* embedding failed — fall back to BM25-only below */ }
 
-		// Score all chunks
-		const maxBM25 = Math.max(...this.chunks.map(c => bm25Score(query, c.text, corpus))) || 1;
-
-		const results: SearchResult[] = this.chunks.map(chunk => {
+		const results: SearchResult[] = this.chunks.map((chunk, i) => {
+			const bm25_score = (rawBM25[i] ?? 0) / maxBM25; // normalize to [0,1]
+			if (!queryVector) return { chunk, score: bm25_score, vector_score: 0, bm25_score };
 			const vector_score = chunk.vector.length === queryVector.length
 				? cosineSimilarity(queryVector, chunk.vector)
 				: 0;
-			const raw_bm25    = bm25Score(query, chunk.text, corpus);
-			const bm25_score  = raw_bm25 / maxBM25; // normalize to [0,1]
-			const score       = 0.7 * vector_score + 0.3 * bm25_score;
-			return { chunk, score, vector_score, bm25_score };
+			return { chunk, score: 0.7 * vector_score + 0.3 * bm25_score, vector_score, bm25_score };
 		});
 
 		return results
@@ -374,17 +511,10 @@ export class VaultIndex {
 			.slice(0, k);
 	}
 
-	private bm25OnlySearch(query: string, corpus: BM25Corpus, k: number, threshold: number): SearchResult[] {
-		const maxBM25 = Math.max(...this.chunks.map(c => bm25Score(query, c.text, corpus))) || 1;
-		return this.chunks
-			.map(chunk => {
-				const raw = bm25Score(query, chunk.text, corpus);
-				const norm = raw / maxBM25;
-				return { chunk, score: norm, vector_score: 0, bm25_score: norm };
-			})
-			.filter(r => r.score >= threshold)
-			.sort((a, b) => b.score - a.score)
-			.slice(0, k);
+	/** Corpus statistics for BM25, rebuilt only after the index has changed. */
+	private bm25Corpus(): BM25Corpus {
+		if (!this.corpus) this.corpus = buildBM25Corpus(this.chunks);
+		return this.corpus;
 	}
 
 	/**

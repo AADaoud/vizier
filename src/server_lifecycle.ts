@@ -22,6 +22,20 @@ export type EnsureServerResult = 'ok' | 'started' | 'offline' | 'no-setup';
 
 type Ensurer = (serverUrl: string) => Promise<EnsureServerResult>;
 
+export const DEFAULT_SERVER_PORT = 11435;
+
+/**
+ * Port the Vizier server should listen on, taken from the "Vizier server URL"
+ * setting. Falls back to the default when the URL has no usable port.
+ */
+export function serverPort(serverUrl: string): number {
+	try {
+		const port = Number(new URL(serverUrl).port);
+		if (Number.isInteger(port) && port > 0 && port <= 65535) return port;
+	} catch { /* not a URL */ }
+	return DEFAULT_SERVER_PORT;
+}
+
 let _ensurer: Ensurer | null = null;
 
 export function registerServerEnsurer(fn: Ensurer | null): void {

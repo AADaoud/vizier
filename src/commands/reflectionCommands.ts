@@ -193,8 +193,10 @@ export async function executeContradict(
 	replaceMessage: ReplaceMessage,
 	model: string,
 	config: CommandConfig,
+	/** Note to check. Defaults to the active note (the `/contradict` command). */
+	target?: TFile,
 ): Promise<void> {
-	const file = app.workspace.getActiveFile();
+	const file = target ?? app.workspace.getActiveFile();
 	if (!file) {
 		addMessage('assistant', 'No active note. Open a note first, then run `/contradict`.');
 		return;

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { requestUrl } from 'obsidian';
-import { registerServerEnsurer, ensureVizierServer, probeServer } from '../src/server_lifecycle';
+import { registerServerEnsurer, ensureVizierServer, probeServer, serverPort } from '../src/server_lifecycle';
 
 // v0.7-only: the Vizier server can now be auto-started on demand. Commands and
 // agent tools call ensureVizierServer() instead of failing with "server not
@@ -46,5 +46,18 @@ describe('ensureVizierServer()', () => {
 		registerServerEnsurer(async (url) => { seen.push(url); return 'started'; });
 		expect(await ensureVizierServer('http://localhost:11435')).toBe('started');
 		expect(seen).toEqual(['http://localhost:11435']);
+	});
+});
+
+describe('serverPort', () => {
+	it.each<[string, number]>([
+		['http://127.0.0.1:11435', 11435],
+		['http://localhost:9000/', 9000],
+		['http://127.0.0.1', 11435],
+		['not a url', 11435],
+		['', 11435],
+		['http://127.0.0.1:0', 11435],
+	])('%s -> %d', (url, port) => {
+		expect(serverPort(url)).toBe(port);
 	});
 });

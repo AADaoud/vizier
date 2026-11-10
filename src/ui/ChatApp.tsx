@@ -77,6 +77,8 @@ function loadHistory(app: App): Message[] {
 	}
 }
 
+const HISTORY_SAVE_DELAY_MS = 800;
+
 function saveHistory(app: App, messages: Message[]): void {
 	try {
 		const trimmed = messages.slice(-MAX_HISTORY);
@@ -210,6 +212,10 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	const abortRef = useRef<AbortController | null>(null);
 
 	const isLoading = commandLoading || streaming;
+	// Set synchronously on send. `isLoading` is read from a render closure, so
+	// two Enter presses in one frame would otherwise both pass the guard.
+	const sendingRef = useRef(false);
+	useEffect(() => { if (!isLoading) sendingRef.current = false; }, [isLoading]);
 	const isSplash  = messages.length === 0;
 
 	// ── Ollama model discovery ─────────────────────────────────────────
@@ -231,7 +237,16 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	}, [settings.ollamaUrl]);
 
 	useEffect(() => { void fetchModels(); }, [fetchModels]);
-	useEffect(() => { saveHistory(app, messages); }, [messages]);
+	// Persist history after a short pause, not on every streamed token: each
+	// save serialises the whole conversation on the UI thread.
+	const latestMessages = useRef(messages);
+	latestMessages.current = messages;
+	useEffect(() => {
+		const t = window.setTimeout(() => saveHistory(app, messages), HISTORY_SAVE_DELAY_MS);
+		return () => window.clearTimeout(t);
+	}, [messages]);
+	// Never lose the tail of a conversation when the view closes mid-pause.
+	useEffect(() => () => saveHistory(app, latestMessages.current), []);
 	useEffect(() => onActivityChange(() => setActivities(getActivities())), []);
 
 	// Smart auto-scroll: follow the stream only while the user is near the
@@ -344,6 +359,9 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 		setStreaming(true);
 		setAgentStatus('Thinking…');
 		const myRun = ++runIdRef.current;
+		// A new run supersedes any run still in flight: stop it for real, so it
+		// cannot keep calling tools (and writing notes) behind this one.
+		abortRef.current?.abort();
 		abortRef.current = new AbortController();
 		const signal = abortRef.current.signal;
 
@@ -540,9 +558,7 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	}, [model, settings.ollamaUrl]);
 
 	// ── Send handler ───────────────────────────────────────────────────
-	const handleSend = useCallback(async () => {
-		const text = input.trim();
-		if (!text || isLoading) return;
+	const dispatchInput = useCallback(async (text: string) => {
 		setInput('');
 		if (textareaRef.current) textareaRef.current.setCssStyles({ height: 'auto' });
 
@@ -604,7 +620,14 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 		} else {
 			await sendToOllama(messages, text);
 		}
-	}, [input, isLoading, messages, app, model, settings, memoryManager, addMessage, addFindResults, replaceLastMessage, sendToAgent, sendToOllama]);
+	}, [messages, app, model, settings, memoryManager, addMessage, addFindResults, replaceLastMessage, sendToAgent, sendToOllama]);
+
+	const handleSend = useCallback(async () => {
+		const text = input.trim();
+		if (!text || isLoading || sendingRef.current) return;
+		sendingRef.current = true;
+		try { await dispatchInput(text); } finally { sendingRef.current = false; }
+	}, [input, isLoading, dispatchInput]);
 
 	const selectCommand = (cmd: SlashCommand) => {
 		setInput(cmd.template);

@@ -98,6 +98,7 @@ Returns the active note's name and content; if nothing is open it says so.`,
 For content >15 lines, always use this — never put that much in chat.
 Choose folder deliberately: put the note where similar notes live (see the folder map in VAULT STATE). Omit folder only to use the default.
 Include YAML frontmatter with type, created, and tags fields.
+Fails if a note with that filename already exists in the folder — use edit_note to change an existing note.
 Returns the created [[wikilink]] to emit in your response.`,
 	},
 
@@ -320,27 +321,14 @@ themes, open questions, and reading threads. Saved to the reflections folder.`,
 		name: 'ingest_document',
 		description: 'Ingest a book or document from the vault by processing it chapter by chapter.',
 		params: {
-			path:    { type: 'string', description: 'Vault path to the document (PDF or markdown).' },
+			path:    { type: 'string', description: 'Vault path to the document (Markdown or plain text).' },
 			chapter: { type: 'number', description: 'Start from this chapter number (default: 1).' },
 		},
 		required: ['path'],
-		keywords: ['ingest', 'book', 'document', 'pdf', 'chapter', 'process book'],
+		keywords: ['ingest', 'book', 'document', 'chapter', 'process book'],
 		doc: `ingest_document — Chapter-by-chapter book processing.
 Produces structured notes per chapter with key claims, entities, and summaries.
-Requires the Vizier server for PDF extraction.`,
-	},
-
-	{
-		name: 'transcribe',
-		description: 'Transcribe an audio file using Whisper.',
-		params: {
-			path: { type: 'string', description: 'Vault path or URL to audio file.' },
-		},
-		required: ['path'],
-		keywords: ['transcribe', 'audio', 'whisper', 'voice note', 'recording', 'speech'],
-		doc: `transcribe — Whisper transcription of an audio file.
-Requires the Vizier server to be running.
-Saves transcript to the transcripts folder.`,
+PDF files are not supported: the document must be Markdown or plain text in the vault.`,
 	},
 
 	// ── Claims & epistemic graph (Phase 3) ───────────────────────────────

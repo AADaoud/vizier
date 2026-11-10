@@ -279,15 +279,22 @@ export function getCachedCapabilities(model: string): ModelCapabilities | null {
 	return _caps.get(model) ?? null;
 }
 
-/** Pre-warm capabilities for all models in a role config. */
+// Roles whose models answer chat requests. Embedding and vision models are
+// never probed: an embedding model cannot answer a chat request, and loading
+// a vision model just to probe it is expensive.
+const CHAT_ROLES: ModelRole[] = ['default', 'utility', 'research'];
+
+/**
+ * Pre-warm the structured-output capability cache for the chat models, one
+ * model at a time so Ollama is not asked to load several models at once.
+ */
 export async function warmCapabilities(cfg: LLMCoreConfig): Promise<void> {
 	const seen = new Set<string>();
-	for (const role of Object.values(cfg.roles)) {
-		for (const model of role.models) {
-			if (!seen.has(model)) {
-				seen.add(model);
-				void detectCapabilities(cfg.ollamaUrl, model);
-			}
+	for (const role of CHAT_ROLES) {
+		for (const model of cfg.roles[role]?.models ?? []) {
+			if (seen.has(model)) continue;
+			seen.add(model);
+			await detectCapabilities(cfg.ollamaUrl, model);
 		}
 	}
 }
@@ -379,7 +386,7 @@ export async function callStructured<T>(
 		const model = await resolveModel(ep, configured);
 		if (!model) { lastErr = new Error(`Model not installed: ${configured}`); continue; }
 		const key = `${ep}:${model}`;
-		if (inCooldown(key)) continue;
+		if (inCooldown(key)) { lastErr = new Error(`Model "${model}" is cooling down after repeated failures — try again in a few seconds`); continue; }
 
 		const caps = getCachedCapabilities(model);
 		// Optimistically use format: true until proven otherwise
@@ -476,7 +483,7 @@ export async function callStreaming(
 		const model = await resolveModel(ep, configured);
 		if (!model) { lastErr = new Error(`Model not installed: ${configured}`); continue; }
 		const key = `${ep}:${model}`;
-		if (inCooldown(key)) continue;
+		if (inCooldown(key)) { lastErr = new Error(`Model "${model}" is cooling down after repeated failures — try again in a few seconds`); continue; }
 
 		// Local models honor only the num_ctx we send; cloud models manage their own.
 		const ctxOpt = await localNumCtxOption(cfg, ep, model);
