@@ -77,6 +77,8 @@ function loadHistory(app: App): Message[] {
 	}
 }
 
+const HISTORY_SAVE_DELAY_MS = 800;
+
 function saveHistory(app: App, messages: Message[]): void {
 	try {
 		const trimmed = messages.slice(-MAX_HISTORY);
@@ -235,7 +237,16 @@ export const ChatApp = ({ settings, initialCommand, onRegisterInputInjector, mem
 	}, [settings.ollamaUrl]);
 
 	useEffect(() => { void fetchModels(); }, [fetchModels]);
-	useEffect(() => { saveHistory(app, messages); }, [messages]);
+	// Persist history after a short pause, not on every streamed token: each
+	// save serialises the whole conversation on the UI thread.
+	const latestMessages = useRef(messages);
+	latestMessages.current = messages;
+	useEffect(() => {
+		const t = window.setTimeout(() => saveHistory(app, messages), HISTORY_SAVE_DELAY_MS);
+		return () => window.clearTimeout(t);
+	}, [messages]);
+	// Never lose the tail of a conversation when the view closes mid-pause.
+	useEffect(() => () => saveHistory(app, latestMessages.current), []);
 	useEffect(() => onActivityChange(() => setActivities(getActivities())), []);
 
 	// Smart auto-scroll: follow the stream only while the user is near the

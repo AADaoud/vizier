@@ -110,25 +110,42 @@ interface BM25Corpus {
 	avgDocLen: number;
 }
 
+interface DocTerms {
+	tf: Map<string, number>;    // term frequency within the chunk
+	len: number;                // token count
+}
+
+// Tokenising a chunk is the expensive part of BM25, and a chunk's text never
+// changes once created (an edit makes a new chunk object), so cache per chunk.
+const docTermsCache = new WeakMap<IndexChunk, DocTerms>();
+
+function docTerms(chunk: IndexChunk): DocTerms {
+	let d = docTermsCache.get(chunk);
+	if (!d) {
+		const tokens = tokenize(chunk.text);
+		const tf = new Map<string, number>();
+		for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+		d = { tf, len: tokens.length };
+		docTermsCache.set(chunk, d);
+	}
+	return d;
+}
+
 function buildBM25Corpus(chunks: IndexChunk[]): BM25Corpus {
 	const df = new Map<string, number>();
 	let totalLen = 0;
 
 	for (const chunk of chunks) {
-		const terms = new Set(tokenize(chunk.text));
-		totalLen += terms.size;
-		for (const t of terms) df.set(t, (df.get(t) ?? 0) + 1);
+		const { tf } = docTerms(chunk);
+		totalLen += tf.size;
+		for (const t of tf.keys()) df.set(t, (df.get(t) ?? 0) + 1);
 	}
 
 	return { df, docCount: chunks.length, avgDocLen: chunks.length ? totalLen / chunks.length : 1 };
 }
 
-function bm25Score(query: string, docText: string, corpus: BM25Corpus, k1 = 1.5, b = 0.75): number {
-	const queryTerms = tokenize(query);
-	const docTokens  = tokenize(docText);
-	const docLen     = docTokens.length;
-	const tf = new Map<string, number>();
-	for (const t of docTokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+function bm25Score(queryTerms: string[], chunk: IndexChunk, corpus: BM25Corpus, k1 = 1.5, b = 0.75): number {
+	const { tf, len: docLen } = docTerms(chunk);
 
 	let score = 0;
 	for (const qt of queryTerms) {
@@ -173,6 +190,8 @@ export class VaultIndex {
 	/** chunk_id → chunk, for O(1) lookups during (re)indexing. */
 	private byId = new Map<string, IndexChunk>();
 	private dirty = false;
+	/** Cached BM25 corpus statistics; cleared whenever chunks change. */
+	private corpus: BM25Corpus | null = null;
 	/** Tail of the indexing work queued per path, so one file is never indexed twice at once. */
 	private queues = new Map<string, Promise<unknown>>();
 	/** Pending debounced re-index timers, per path. */
@@ -268,6 +287,7 @@ export class VaultIndex {
 			this.byId.set(c.chunk_id, c);
 		}
 		this.dirty = true;
+		this.corpus = null;
 	}
 
 	private cancelScheduled(filePath: string): void {
@@ -462,30 +482,27 @@ export class VaultIndex {
 		await this.ready;
 		if (this.chunks.length === 0) return [];
 
-		const cfg    = buildLLMConfig(settings);
-		const corpus = buildBM25Corpus(this.chunks);
+		const cfg = buildLLMConfig(settings);
+
+		// BM25 once per chunk, with the corpus statistics cached between queries.
+		const queryTerms = tokenize(query);
+		const corpus     = this.bm25Corpus();
+		const rawBM25    = this.chunks.map(c => bm25Score(queryTerms, c, corpus));
+		const maxBM25    = rawBM25.reduce((m, x) => (x > m ? x : m), 0) || 1;
 
 		// Get query embedding
-		let queryVector: number[];
+		let queryVector: number[] | null = null;
 		try {
-			const { vector } = await getEmbedding(cfg, query);
-			queryVector = vector;
-		} catch {
-			// Embedding failed — fall back to BM25-only
-			return this.bm25OnlySearch(query, corpus, k, threshold);
-		}
+			queryVector = (await getEmbedding(cfg, query)).vector;
+		} catch { /* embedding failed — fall back to BM25-only below */ }
 
-		// Score all chunks
-		const maxBM25 = Math.max(...this.chunks.map(c => bm25Score(query, c.text, corpus))) || 1;
-
-		const results: SearchResult[] = this.chunks.map(chunk => {
+		const results: SearchResult[] = this.chunks.map((chunk, i) => {
+			const bm25_score = (rawBM25[i] ?? 0) / maxBM25; // normalize to [0,1]
+			if (!queryVector) return { chunk, score: bm25_score, vector_score: 0, bm25_score };
 			const vector_score = chunk.vector.length === queryVector.length
 				? cosineSimilarity(queryVector, chunk.vector)
 				: 0;
-			const raw_bm25    = bm25Score(query, chunk.text, corpus);
-			const bm25_score  = raw_bm25 / maxBM25; // normalize to [0,1]
-			const score       = 0.7 * vector_score + 0.3 * bm25_score;
-			return { chunk, score, vector_score, bm25_score };
+			return { chunk, score: 0.7 * vector_score + 0.3 * bm25_score, vector_score, bm25_score };
 		});
 
 		return results
@@ -494,17 +511,10 @@ export class VaultIndex {
 			.slice(0, k);
 	}
 
-	private bm25OnlySearch(query: string, corpus: BM25Corpus, k: number, threshold: number): SearchResult[] {
-		const maxBM25 = Math.max(...this.chunks.map(c => bm25Score(query, c.text, corpus))) || 1;
-		return this.chunks
-			.map(chunk => {
-				const raw = bm25Score(query, chunk.text, corpus);
-				const norm = raw / maxBM25;
-				return { chunk, score: norm, vector_score: 0, bm25_score: norm };
-			})
-			.filter(r => r.score >= threshold)
-			.sort((a, b) => b.score - a.score)
-			.slice(0, k);
+	/** Corpus statistics for BM25, rebuilt only after the index has changed. */
+	private bm25Corpus(): BM25Corpus {
+		if (!this.corpus) this.corpus = buildBM25Corpus(this.chunks);
+		return this.corpus;
 	}
 
 	/**

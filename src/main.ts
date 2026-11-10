@@ -33,6 +33,9 @@ function noticeCallbacks(): { addMessage: AddMessage; replaceMessage: AddMessage
 
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
+// How long after the workspace is ready to probe chat-model capabilities.
+const CAPABILITY_WARM_DELAY = 8_000;
+
 export default class VizierPlugin extends Plugin {
 	settings: AIAgentSettings;
 	serverManager: TranscriptServerManager;
@@ -59,7 +62,13 @@ export default class VizierPlugin extends Plugin {
 		setDebugLogging(this.settings.features.debugLog ?? false);
 
 		// ── Phase 0: warm capability cache for all configured models ──
-		void warmCapabilities(buildLLMConfig(this.settings));
+		// Deferred until well after launch, so probing does not make Ollama
+		// load models while Obsidian is still starting.
+		this.app.workspace.onLayoutReady(() => {
+			this.registerInterval(window.setTimeout(() => {
+				void warmCapabilities(buildLLMConfig(this.settings));
+			}, CAPABILITY_WARM_DELAY) as unknown as number);
+		});
 
 		// ── Phase 3: give agent tools access to shared context ────────
 		setAgentPluginDir(pluginDir);
