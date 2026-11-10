@@ -36,8 +36,7 @@ Free-form chat runs through a **multi-round agent loop**: the model decides whic
 | `/clip <url>` | Fetch, summarize, and save a URL to your Clips folder |
 | `/clip long <url>` | Clip with detailed notes — ideal for long commentaries or reads |
 | `/clip learn <url>` | Clip with detailed notes plus a study guide popup — ideal for lectures |
-| `/transcribe <file or url>` | Transcribe an audio file or podcast URL via Whisper |
-| `/ingest <path>` | Ingest a book or PDF chapter-by-chapter into your vault |
+| `/ingest <path>` | Ingest a book (Markdown or plain text) chapter-by-chapter into your vault |
 | `/handwriting` | Transcribe a photo of handwritten notes with your vision model and save as a vault note |
 
 ### Human Network
@@ -172,9 +171,7 @@ Articles are fetched via [Jina AI Reader](https://jina.ai/reader/) (`r.jina.ai`)
 | Timeline folders | `Human Network/Events, Human Network/People, Human Network/Ideas` | Comma-separated folders `/timeline` searches |
 | Reflections folder | `Reflections` | Vault folder where `/weekly`, `/monthly`, and `/freewrite` save notes |
 | Books folder | `Books` | Vault folder where `/ingest` saves processed book notes |
-| Transcripts folder | `Transcripts` | Vault folder where `/transcribe` saves audio transcripts |
 | Theses folder | `Theses` | Vault folder where `/thesis` saves structured documents |
-| Whisper model | `base` | Model size for audio transcription (`tiny` / `base` / `small` / `medium`) |
 | Max notes per recluster | `100` | Maximum notes `/recluster` will process (most recent by modification date) |
 | Local model context window (num_ctx) | `8192` | Context size for **local** models; cloud models use their full window. `0` = use the model's max |
 | Model roles | per-role | Ordered fallback chains for the default / utility / research / embedding roles |
@@ -201,7 +198,7 @@ Release artifacts: `main.js`, `manifest.json`, `styles.css`.
 
 **Do I need an internet connection?**
 
-Only for `/summarize`/`/clip` (fetches the article/transcript via Jina), `/person`/`/event`/`/idea`/`/entity` (Wikipedia lookup), and `/transcribe` with a podcast URL. All AI inference runs fully offline via Ollama.
+Only for `/summarize`/`/clip` (fetches the article/transcript via Jina), and `/person`/`/event`/`/idea`/`/entity` (Wikipedia lookup). All AI inference runs fully offline via Ollama.
 
 ---
 

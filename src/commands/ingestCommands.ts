@@ -1,4 +1,4 @@
-import { App, Notice, requestUrl } from 'obsidian';
+import { App } from 'obsidian';
 import { callOllamaStructured } from '../utils/ollama';
 import { Prompts } from '../prompts';
 import { AIAgentSettings } from '../settings';
@@ -16,11 +16,6 @@ interface ChapterResult {
 interface ServerChapter {
 	title: string;
 	content: string;
-}
-
-interface TranscriptSegment {
-	start: number;
-	text: string;
 }
 
 const CHAPTER_SCHEMA = {
@@ -52,25 +47,10 @@ export async function executeIngest(
 
 	let chapters: ServerChapter[];
 
-	if (filePath.endsWith('.pdf')) {
-		// PDF: requires Vizier server
-		addMessage('assistant', `Ingesting **${filePath}**… (requires Vizier server — run "Setup / start Vizier server" from the command palette if this fails)`);
-		try {
-			const resp = await requestUrl({
-				url: `${config.serverUrl}/extract_pdf`,
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ path: filePath }),
-				throw: false,
-			});
-			if (resp.status >= 400) throw new Error(`Server error: HTTP ${resp.status}`);
-			const data = resp.json as { chapters?: ServerChapter[] };
-			chapters = data.chapters ?? [];
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			addMessage('assistant', `Failed to extract PDF: ${msg}`);
-			return;
-		}
+	if (filePath.toLowerCase().endsWith('.pdf')) {
+		// The Vizier server has no PDF extraction route yet.
+		addMessage('assistant', 'PDF ingestion is not available in this version of Vizier. Convert the book to Markdown or plain text, add it to the vault, and run `/ingest` on that file.');
+		return;
 	} else {
 		// Markdown: read from vault, AI processing via Ollama
 		addMessage('assistant', `Ingesting **${filePath}**…`);
@@ -174,112 +154,21 @@ export async function executeIngest(
 }
 
 // ── /transcribe ───────────────────────────────────────────────────────────
-
-function formatTimestamp(seconds: number): string {
-	const m = Math.floor(seconds / 60);
-	const s = Math.floor(seconds % 60);
-	return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
+// The Vizier server has no audio transcription route yet, so the command says
+// so up front rather than posting to a route that does not exist.
 
 export async function executeTranscribe(
 	args: string,
-	app: App,
+	_app: App,
 	addMessage: AddMessage,
-	replaceMessage: ReplaceMessage,
-	model: string,
-	config: CommandConfig,
-	settings: AIAgentSettings,
+	_replaceMessage: ReplaceMessage,
+	_model: string,
+	_config: CommandConfig,
+	_settings: AIAgentSettings,
 ): Promise<void> {
-	const input = args.trim();
-	if (!input) {
+	if (!args.trim()) {
 		addMessage('assistant', 'Usage: `/transcribe <vault file path or URL>`');
 		return;
 	}
-
-	addMessage('assistant', `Transcribing **${input}**… (requires Vizier server with Whisper installed — run "Setup / start Vizier server" from the command palette if this fails. This may take several minutes.`);
-
-	let segments: TranscriptSegment[];
-
-	try {
-		const resp = await requestUrl({
-			url: `${config.serverUrl}/transcribe`,
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ path_or_url: input, model: settings.whisperModel }),
-			throw: false,
-		});
-		if (resp.status >= 400) {
-			throw new Error((resp.json as { error?: string })?.error ?? `HTTP ${resp.status}`);
-		}
-		const data = resp.json as { segments?: TranscriptSegment[] };
-		segments = data.segments ?? [];
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		addMessage('assistant', `Transcription failed: ${msg}`);
-		return;
-	}
-
-	if (segments.length === 0) {
-		addMessage('assistant', 'Transcription returned no segments.');
-		return;
-	}
-
-	// Group segments into ~60-second blocks
-	const blocks: { heading: string; lines: string[] }[] = [];
-	let currentBlock: { heading: string; lines: string[] } | null = null;
-	let blockStart = 0;
-
-	for (const seg of segments) {
-		if (!currentBlock || seg.start - blockStart >= 60) {
-			currentBlock = { heading: formatTimestamp(seg.start), lines: [] };
-			blocks.push(currentBlock);
-			blockStart = seg.start;
-		}
-		currentBlock.lines.push(seg.text.trim());
-	}
-
-	// Build note content
-	const title = input.includes('/')
-		? input.split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'Transcript'
-		: input.replace(/^https?:\/\//, '').slice(0, 40);
-
-	const noteLines: string[] = [
-		`---`,
-		`type: transcript`,
-		`created: ${today()}`,
-		`source: "${input}"`,
-		`---`,
-		'',
-		`# ${title}`,
-		'',
-	];
-
-	for (const block of blocks) {
-		noteLines.push(`## ${block.heading}`);
-		noteLines.push('');
-		noteLines.push(block.lines.join(' '));
-		noteLines.push('');
-	}
-
-	const noteContent = noteLines.join('\n');
-
-	await ensureFolder(app, settings.transcriptsFolder);
-	const fileName = sanitizeFilename(`${today()} - ${title}`);
-	const notePath = await deduplicatePath(app, `${settings.transcriptsFolder}/${fileName}.md`);
-	await app.vault.create(notePath, noteContent);
-
-	const wordCount = segments.reduce((n, s) => n + s.text.split(' ').length, 0);
-	replaceMessage(
-		'assistant',
-		`Transcript saved to [[${notePath}]] (~${wordCount} words).\n\nSend \`/clip learn ${notePath}\` to generate a study guide from the transcript.`
-	);
-
-	new Notice(`Transcript saved: ${notePath}`);
-
-	// Open the note
-	const file = app.vault.getAbstractFileByPath(notePath);
-	if (file && 'stat' in file) {
-		const leaf = app.workspace.getLeaf();
-		await leaf.openFile(file as Parameters<typeof leaf.openFile>[0]);
-	}
+	addMessage('assistant', 'Audio transcription is not available in this version of Vizier. For a YouTube video, `/summarize <url>` or `/clip <url>` works from its transcript.');
 }

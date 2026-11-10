@@ -38,6 +38,7 @@ import {
 import {
 	executeStandardize,
 } from '../commands/miscCommands';
+import { executeIngest } from '../commands/ingestCommands';
 import {
 	findEntityByName,
 	getLinkGraph,
@@ -225,8 +226,8 @@ export function resolveNoteTarget(app: App, name: string, folder = ''): { file?:
 
 async function handleReadActiveNote(app: App, maxChars = DEFAULT_READ_NOTE_CHARS): Promise<string> {
 	const file = app.workspace.getActiveFile();
-	if (!file) return 'No note is currently open. Ask the user which note they mean, or use vault_search.';
-	if (file.extension !== 'md') return `The active file "${file.name}" is not a markdown note.`;
+	if (!file) return 'ERROR: No note is currently open. Ask the user which note they mean, or use vault_search.';
+	if (file.extension !== 'md') return `ERROR: The active file "${file.name}" is not a markdown note.`;
 
 	try {
 		const content = await app.vault.cachedRead(file);
@@ -235,7 +236,7 @@ async function handleReadActiveNote(app: App, maxChars = DEFAULT_READ_NOTE_CHARS
 			: content;
 		return `Active note: [[${file.basename}]] (\`${file.path}\`)\n\n${body}`;
 	} catch (err) {
-		return `Failed to read the active note: ${err instanceof Error ? err.message : String(err)}`;
+		return `ERROR: Failed to read the active note: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -244,7 +245,7 @@ async function handleReadNote(params: Record<string, unknown>, app: App, maxChar
 	if (!name) return 'ERROR: read_note requires a name parameter.';
 
 	const { file, error } = resolveNoteTarget(app, name, str(params, 'folder'));
-	if (error || !file) return error ?? `Note not found: "${name}".`;
+	if (error || !file) return `ERROR: ${error ?? `Note not found: "${name}".`}`;
 
 	try {
 		const content = await app.vault.cachedRead(file);
@@ -253,7 +254,7 @@ async function handleReadNote(params: Record<string, unknown>, app: App, maxChar
 			: content;
 		return `## [[${file.basename}]]\n\n${preview}`;
 	} catch (err) {
-		return `Failed to read "${name}": ${err instanceof Error ? err.message : String(err)}`;
+		return `ERROR: Failed to read "${name}": ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -294,18 +295,18 @@ async function handleEditNote(params: Record<string, unknown>, app: App): Promis
 	if (replace === '') return 'ERROR: edit_note requires a replace parameter (use a space character to effectively delete).';
 
 	const { file, error } = resolveNoteTarget(app, name, str(params, 'folder'));
-	if (error || !file) return error ?? `Note not found: "${name}".`;
+	if (error || !file) return `ERROR: ${error ?? `Note not found: "${name}".`}`;
 
 	try {
 		const content = await app.vault.cachedRead(file);
 		const occurrences = content.split(find).length - 1;
-		if (occurrences === 0) return `Find string not found in [[${file.basename}]]. The note may have changed — use read_note to check the current content.`;
-		if (occurrences > 1) return `Find string appears ${occurrences} times in [[${file.basename}]] — provide more surrounding context to make it unique.`;
+		if (occurrences === 0) return `ERROR: Find string not found in [[${file.basename}]]. The note may have changed — use read_note to check the current content.`;
+		if (occurrences > 1) return `ERROR: Find string appears ${occurrences} times in [[${file.basename}]] — provide more surrounding context to make it unique.`;
 
 		await app.vault.modify(file, content.replace(find, replace));
 		return `Updated [[${file.basename}]].`;
 	} catch (err) {
-		return `Failed to edit note: ${err instanceof Error ? err.message : String(err)}`;
+		return `ERROR: Failed to edit note: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -368,7 +369,7 @@ async function handleLinkEntities(params: Record<string, unknown>, app: App): Pr
 		await executeLink(arg, app, capture.addMessage, capture.replaceMessage);
 		return capture.last() || `Linked [[${entityA}]] ↔ [[${entityB}]].`;
 	} catch (err) {
-		return `Failed to link entities: ${err instanceof Error ? err.message : String(err)}`;
+		return `ERROR: Failed to link entities: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -400,7 +401,7 @@ async function handleWikiLookup(
 		const pageData = pageResp.json as { query?: { pages?: Record<string, { extract?: string; title: string }> } };
 		const pages = Object.values(pageData.query?.pages ?? {});
 		const page = pages[0];
-		if (!page) return `Wikipedia: could not fetch page for "${topTitle}".`;
+		if (!page) return `ERROR: Wikipedia: could not fetch page for "${topTitle}".`;
 
 		// Strip HTML tags from extract
 		const extract = (page.extract ?? '').replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim();
@@ -408,7 +409,7 @@ async function handleWikiLookup(
 
 		return `**Wikipedia: ${page.title}**\n\n${preview}\n\n*Source: model should offer to create entity note from this.*`;
 	} catch (err) {
-		return `Wikipedia lookup failed: ${err instanceof Error ? err.message : String(err)}. Use model knowledge and mark as (model knowledge — unverified).`;
+		return `ERROR: Wikipedia lookup failed: ${err instanceof Error ? err.message : String(err)}. Use model knowledge and mark as (model knowledge — unverified).`;
 	}
 }
 
@@ -469,8 +470,8 @@ async function handleBridge(params: Record<string, unknown>, app: App, settings:
 	const fileA = findEntityByName(app, entityA, allFolders);
 	const fileB = findEntityByName(app, entityB, allFolders);
 
-	if (!fileA) return `Entity not found: "${entityA}". Use create_entity first or check the spelling.`;
-	if (!fileB) return `Entity not found: "${entityB}". Use create_entity first or check the spelling.`;
+	if (!fileA) return `ERROR: Entity not found: "${entityA}". Use create_entity first or check the spelling.`;
+	if (!fileB) return `ERROR: Entity not found: "${entityB}". Use create_entity first or check the spelling.`;
 
 	// BFS shortest path
 	const queue: Array<{ path: string; chain: string[] }> = [{ path: fileA.path, chain: [fileA.basename] }];
@@ -532,7 +533,7 @@ async function handleAddClaim(params: Record<string, unknown>, app: App): Promis
 	if (!text) return 'ERROR: add_claim requires a text parameter.';
 
 	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
-	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+	if (!file) return `ERROR: Note not found: "${noteName || '(no active note)'}".`;
 
 	const claim = await addClaim(app, file, text, confidence, sources, provenance);
 	return `Added claim \`${claim.id}\` to [[${file.basename}]]: "${claim.text}"${sources.length ? '' : ' (uncited — consider cite_claim once a source is known)'}`;
@@ -545,10 +546,10 @@ async function handleCiteClaim(params: Record<string, unknown>, app: App): Promi
 	if (!claimId || !source) return 'ERROR: cite_claim requires claim_id and source parameters.';
 
 	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
-	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+	if (!file) return `ERROR: Note not found: "${noteName || '(no active note)'}".`;
 
 	const updated = await citeClaim(app, file, claimId, source);
-	if (!updated) return `Claim \`${claimId}\` not found in [[${file.basename}]]. Use list_claims to see its claims.`;
+	if (!updated) return `ERROR: Claim \`${claimId}\` not found in [[${file.basename}]]. Use list_claims to see its claims.`;
 	return `Cited claim \`${claimId}\` in [[${file.basename}]] — sources now: ${updated.sources.join('; ')}`;
 }
 
@@ -559,17 +560,17 @@ async function handleContestClaim(params: Record<string, unknown>, app: App): Pr
 	if (!claimId || !reason) return 'ERROR: contest_claim requires claim_id and reason parameters.';
 
 	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
-	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+	if (!file) return `ERROR: Note not found: "${noteName || '(no active note)'}".`;
 
 	const updated = await contestClaim(app, file, claimId, reason);
-	if (!updated) return `Claim \`${claimId}\` not found in [[${file.basename}]]. Use list_claims to see its claims.`;
+	if (!updated) return `ERROR: Claim \`${claimId}\` not found in [[${file.basename}]]. Use list_claims to see its claims.`;
 	return `Marked claim \`${claimId}\` in [[${file.basename}]] as CONTESTED: ${reason}`;
 }
 
 async function handleListClaims(params: Record<string, unknown>, app: App): Promise<string> {
 	const noteName = str(params, 'note_name');
 	const file = noteName ? findNote(app, noteName) : app.workspace.getActiveFile();
-	if (!file) return `Note not found: "${noteName || '(no active note)'}".`;
+	if (!file) return `ERROR: Note not found: "${noteName || '(no active note)'}".`;
 	return `Claims on [[${file.basename}]]:\n\n${formatClaims(getClaims(app, file))}`;
 }
 
@@ -578,7 +579,7 @@ async function handleScanContradictions(
 	app: App,
 	settings: AIAgentSettings
 ): Promise<string> {
-	if (!_pluginDir) return 'Contradiction scan unavailable (plugin dir not initialised).';
+	if (!_pluginDir) return 'ERROR: Contradiction scan unavailable (plugin dir not initialised).';
 	const { runContradictionScan } = await import('../epistemic/contradiction_engine');
 	const r = await runContradictionScan(app, settings, _pluginDir);
 	return `Contradiction scan complete: ${r.claims} claims, ${r.candidates} candidate pairs, ${r.checked} checked, ${r.flagged} contradiction(s) flagged${r.flagged > 0 ? ` in ${settings.contradictionsFolder}` : ''}.`;
@@ -676,7 +677,7 @@ async function handleAuditSources(
 		await executeSources('', app, capture.addMessage, capture.replaceMessage, settings.roles.default.models[0] ?? settings.defaultModel, cfg);
 		return capture.last() || 'Source audit complete.';
 	} catch (err) {
-		return `Source audit failed: ${err instanceof Error ? err.message : String(err)}`;
+		return `ERROR: Source audit failed: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -758,26 +759,16 @@ async function handleIngestDocument(
 ): Promise<string> {
 	const docPath = str(params, 'path');
 	if (!docPath) return 'ERROR: ingest_document requires a path parameter.';
+	if (docPath.toLowerCase().endsWith('.pdf')) {
+		return 'ERROR: PDF ingestion is not available in this version of Vizier. The document must be Markdown or plain text in the vault.';
+	}
 	const capture = captureMessages();
 	try {
-		const { executeIngest } = await import('../commands/ingestCommands') as { executeIngest?: (args: string, app: App, add: (r: string, c: string) => void, replace: (r: string, c: string) => void, model: string, cfg: CommandConfig, settings: AIAgentSettings) => Promise<void> };
-		if (executeIngest) {
-			await executeIngest(docPath, app, capture.addMessage, capture.replaceMessage, settings.roles.research.models[0] ?? settings.defaultModel, cfg, settings);
-		} else {
-			return 'Ingest tool not available — use /ingest as a slash command.';
-		}
+		await executeIngest(docPath, app, capture.addMessage, capture.replaceMessage, settings.roles.research.models[0] ?? settings.defaultModel, cfg, settings);
 		return capture.last() || `Ingested ${docPath}.`;
-	} catch {
-		return 'Document ingestion unavailable. Use /ingest as a slash command.';
+	} catch (err) {
+		return `ERROR: Document ingestion failed: ${err instanceof Error ? err.message : String(err)}`;
 	}
-}
-
-// The Vizier server has no audio transcription route, so this tool cannot
-// succeed. Report a real failure instead of sending the model to a slash
-// command that fails the same way.
-function handleTranscribe(params: Record<string, unknown>): string {
-	if (!str(params, 'path')) return 'ERROR: transcribe requires a path parameter.';
-	return 'ERROR: Audio transcription is not available in this version of Vizier. Tell the user it cannot be done.';
 }
 
 // ── Per-tool param validation ─────────────────────────────────────────────
@@ -888,9 +879,6 @@ export async function executeTool(
 			case 'ingest_document':
 				output = await handleIngestDocument(call.params, app, settings, cfg);
 				break;
-			case 'transcribe':
-				output = handleTranscribe(call.params);
-				break;
 			case 'add_claim':
 				output = await handleAddClaim(call.params, app);
 				break;
@@ -907,13 +895,13 @@ export async function executeTool(
 				output = await handleScanContradictions(call.params, app, settings);
 				break;
 			default:
-				output = `Unknown tool: "${call.name}". Available tools: ${getAllToolNames().join(', ')}.`;
+				output = `ERROR: Unknown tool: "${call.name}". Available tools: ${getAllToolNames().join(', ')}.`;
 		}
 
 		return { ok: !output.startsWith('ERROR:'), output, duration_ms: Date.now() - start };
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		return { ok: false, output: `Tool "${call.name}" threw an error: ${msg}`, duration_ms: Date.now() - start };
+		return { ok: false, output: `ERROR: Tool "${call.name}" threw an error: ${msg}`, duration_ms: Date.now() - start };
 	}
 }
 
@@ -921,6 +909,6 @@ function getAllToolNames(): string[] {
 	return ['vault_search', 'read_note', 'read_active_note', 'write_note', 'edit_note', 'create_entity',
 		'link_entities', 'wiki_lookup', 'fetch_url', 'summarize_media', 'bridge',
 		'timeline', 'contradict_note', 'audit_sources', 'recluster', 'thesis',
-		'socratic', 'reflection', 'standardize_folder', 'ingest_document', 'transcribe',
+		'socratic', 'reflection', 'standardize_folder', 'ingest_document',
 		'add_claim', 'cite_claim', 'contest_claim', 'list_claims', 'scan_contradictions'];
 }

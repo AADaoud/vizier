@@ -21,6 +21,7 @@ vi.mock('../src/commands/reflectionCommands', async (orig) => {
 });
 
 import { executeTool } from '../src/agent/tool_execution';
+import { getToolByName } from '../src/agent/tool_schemas';
 import type { ToolCall } from '../src/schemas/index';
 import type { App } from 'obsidian';
 import { createFakeApp } from './mocks/fakeVault';
@@ -64,10 +65,15 @@ describe('tools that wrap slash-command handlers', () => {
 	});
 });
 
-describe('transcribe', () => {
-	it('reports a failure, because the server has no transcription route', async () => {
+describe('features with no server side', () => {
+	it('transcribe is not offered as a tool', async () => {
+		expect(getToolByName('transcribe')).toBeUndefined();
 		const r = await run('transcribe', { path: 'audio.mp3' });
-		expect(r.output).toMatch(/^ERROR:.*not available/i);
-		expect(r.output).not.toMatch(/slash command/i);
+		expect(r.output).toMatch(/^ERROR:/);
+	});
+
+	it('ingest_document reports a failure for a PDF', async () => {
+		const r = await run('ingest_document', { path: 'Books/book.pdf' });
+		expect(r.output).toMatch(/^ERROR:.*PDF.*not available/i);
 	});
 });
