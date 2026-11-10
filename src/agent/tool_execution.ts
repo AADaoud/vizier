@@ -31,6 +31,9 @@ import {
 	executeSocratic,
 	executeSources,
 	executeReflection,
+	executeContradict,
+	executeRecluster,
+	executeThesis,
 } from '../commands/reflectionCommands';
 import {
 	executeStandardize,
@@ -635,7 +638,6 @@ async function handleContradictNote(
 	settings: AIAgentSettings,
 	cfg: CommandConfig
 ): Promise<string> {
-	// Import the existing contradict handler dynamically (it lives in slashCommands or registerAll)
 	const noteName = str(params, 'note_name');
 	let file: TFile | null = null;
 	if (noteName) {
@@ -644,20 +646,18 @@ async function handleContradictNote(
 	} else {
 		file = app.workspace.getActiveFile();
 	}
-	if (!file) return 'No note to check. Open a note or pass note_name.';
+	if (!file) {
+		return noteName
+			? `ERROR: Note not found: "${noteName}".`
+			: 'ERROR: No note to check. Open a note or pass note_name.';
+	}
 
-	// Use existing /contradict logic from registerAll
 	const capture = captureMessages();
 	try {
-		const { executeContradict } = await import('../commands/registerAll') as { executeContradict?: (args: string, app: App, add: (r: string, c: string) => void, replace: (r: string, c: string) => void, model: string, cfg: CommandConfig) => Promise<void> };
-		if (executeContradict) {
-			await executeContradict('', app, capture.addMessage, capture.replaceMessage, settings.roles.default.models[0] ?? settings.defaultModel, cfg);
-		} else {
-			return 'Contradict tool not available — run /contradict as a slash command instead.';
-		}
+		await executeContradict('', app, capture.addMessage, capture.replaceMessage, settings.roles.default.models[0] ?? settings.defaultModel, cfg, file);
 		return capture.last() || 'Contradiction check complete.';
-	} catch {
-		return 'Contradiction check unavailable. Use /contradict as a slash command.';
+	} catch (err) {
+		return `ERROR: Contradiction check failed: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -685,17 +685,11 @@ async function handleRecluster(
 	const folder = str(params, 'folder');
 	if (!folder) return 'ERROR: recluster requires a folder parameter.';
 	const capture = captureMessages();
-	// recluster is in registerAll / slashCommands
 	try {
-		const { executeRecluster } = await import('../commands/registerAll') as { executeRecluster?: (args: string, app: App, add: (r: string, c: string) => void, replace: (r: string, c: string) => void, model: string, cfg: CommandConfig, settings: AIAgentSettings) => Promise<void> };
-		if (executeRecluster) {
-			await executeRecluster(folder, app, capture.addMessage, capture.replaceMessage, settings.roles.research.models[0] ?? settings.defaultModel, cfg, settings);
-		} else {
-			return 'Recluster tool not available — use /recluster as a slash command.';
-		}
+		await executeRecluster(folder, app, capture.addMessage, capture.replaceMessage, settings.roles.research.models[0] ?? settings.defaultModel, cfg, settings);
 		return capture.last() || `Reclustered folder: ${folder}.`;
-	} catch {
-		return 'Recluster unavailable. Use /recluster as a slash command.';
+	} catch (err) {
+		return `ERROR: Recluster failed: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -709,15 +703,10 @@ async function handleThesis(
 	if (!topic) return 'ERROR: thesis requires a topic parameter.';
 	const capture = captureMessages();
 	try {
-		const { executeThesis } = await import('../commands/registerAll') as { executeThesis?: (args: string, app: App, add: (r: string, c: string) => void, replace: (r: string, c: string) => void, model: string, cfg: CommandConfig, settings: AIAgentSettings) => Promise<void> };
-		if (executeThesis) {
-			await executeThesis(topic, app, capture.addMessage, capture.replaceMessage, settings.roles.research.models[0] ?? settings.defaultModel, cfg, settings);
-		} else {
-			return 'Thesis tool not available — use /thesis as a slash command.';
-		}
+		await executeThesis(topic, app, capture.addMessage, capture.replaceMessage, settings.roles.research.models[0] ?? settings.defaultModel, cfg, settings);
 		return capture.last() || `Thesis draft generated for "${topic}".`;
-	} catch {
-		return 'Thesis generation unavailable. Use /thesis as a slash command.';
+	} catch (err) {
+		return `ERROR: Thesis generation failed: ${err instanceof Error ? err.message : String(err)}`;
 	}
 }
 
@@ -779,26 +768,12 @@ async function handleIngestDocument(
 	}
 }
 
-async function handleTranscribe(
-	params: Record<string, unknown>,
-	app: App,
-	settings: AIAgentSettings,
-	cfg: CommandConfig
-): Promise<string> {
-	const filePath = str(params, 'path');
-	if (!filePath) return 'ERROR: transcribe requires a path parameter.';
-	const capture = captureMessages();
-	try {
-		const { executeTranscribe } = await import('../commands/registerAll') as { executeTranscribe?: (args: string, app: App, add: (r: string, c: string) => void, replace: (r: string, c: string) => void, model: string, cfg: CommandConfig, settings: AIAgentSettings) => Promise<void> };
-		if (executeTranscribe) {
-			await executeTranscribe(filePath, app, capture.addMessage, capture.replaceMessage, settings.roles.default.models[0] ?? settings.defaultModel, cfg, settings);
-		} else {
-			return 'Transcription tool not available — use /transcribe as a slash command.';
-		}
-		return capture.last() || `Transcribed ${filePath}.`;
-	} catch {
-		return 'Transcription unavailable. Use /transcribe as a slash command.';
-	}
+// The Vizier server has no audio transcription route, so this tool cannot
+// succeed. Report a real failure instead of sending the model to a slash
+// command that fails the same way.
+function handleTranscribe(params: Record<string, unknown>): string {
+	if (!str(params, 'path')) return 'ERROR: transcribe requires a path parameter.';
+	return 'ERROR: Audio transcription is not available in this version of Vizier. Tell the user it cannot be done.';
 }
 
 // ── Per-tool param validation ─────────────────────────────────────────────
@@ -910,7 +885,7 @@ export async function executeTool(
 				output = await handleIngestDocument(call.params, app, settings, cfg);
 				break;
 			case 'transcribe':
-				output = await handleTranscribe(call.params, app, settings, cfg);
+				output = handleTranscribe(call.params);
 				break;
 			case 'add_claim':
 				output = await handleAddClaim(call.params, app);
